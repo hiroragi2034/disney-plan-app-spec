@@ -1,0 +1,244 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1794444989489,
+      "tag": "0001_initial",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1794444989489,
+      "tag": "0002_disney_plan_app_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794448759923,
+      "tag": "0003_add_plan_cost_breakdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1794449282064,
+      "tag": "0004_add_item_images",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794449599553,
+      "tag": "0005_add_images_fetch_started_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1794449940412,
+      "tag": "0006_add_item_image_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1794452180648,
+      "tag": "0007_add_item_official_url",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794454364684,
+      "tag": "0008_add_research_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794455985319,
+      "tag": "0009_add_wait_time_reference_sites",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1794460164376,
+      "tag": "0010_add_item_estimated_wait",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1794462632133,
+      "tag": "0011_add_plan_set_rebuilt_from",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1794464948614,
+      "tag": "0012_add_per_plan_progress_and_dedupe_titles",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1794465642511,
+      "tag": "0013_add_facility_dictionary_and_generation_metrics",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1794466553310,
+      "tag": "0014_add_plan_set_sharing",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1794471605727,
+      "tag": "0015_add_verification_record_and_dpa_purchase_time",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1794474551900,
+      "tag": "0016_clear_set_6_rebuild_marker",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1794476563444,
+      "tag": "0017_add_dpa_snapshot_text",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1794505362659,
+      "tag": "0018_register_queue_times_and_ropedrop_wait_time_sources",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1794508130731,
+      "tag": "0019_add_walking_speed_and_travel_times",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1794509122123,
+      "tag": "0020_register_area_travel_matrix_real_data",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1794510339690,
+      "tag": "0021_add_same_day_search",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1794529597172,
+      "tag": "0022_add_plan_re_verification_and_eve_dialog",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1794543151348,
+      "tag": "0023_add_normalized_source_layer",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1794560833562,
+      "tag": "0024_add_purchase_kind_and_item_unit_price",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1794623452874,
+      "tag": "0025_add_crowd_forecast_to_plan_sets",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1794624750258,
+      "tag": "0026_unify_priority_and_add_plan_crowd_scenario",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1794676777531,
+      "tag": "0027_add_item_unconfirmed_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1794698420977,
+      "tag": "0028_add_snapshot_canonical_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1794717273852,
+      "tag": "0029_add_announcement_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1794783962878,
+      "tag": "0030_add_restaurant_classification",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1794786766388,
+      "tag": "0031_add_restaurant_fact_layer",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1794804968400,
+      "tag": "0032_add_fact_build_value_diff_and_invalidation",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1794869674521,
+      "tag": "0033_add_purchase_count_to_plan_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1794890641283,
+      "tag": "0034_add_generation_escape_state",
+      "breakpoints": true
+    }
+  ]
+}

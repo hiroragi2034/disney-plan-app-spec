@@ -1,0 +1,398 @@
+{
+ "provenance": "Facility coordinates held by the original app's facility dictionary (getfacilitydictionary), exported 2026-11-18. Coordinates were derived by the §10 rule (Nominatim, facility name as-is, in-park-range candidates, fixed-order variants) and verified in the 2026-11-18 full census: of the 48 facilities where both the dictionary and the rule hold coordinates, 46 matched at 0 m distance. Two entries are facility-specific values whose provenance could NOT be verified (unresolved through every step of the rule, including English names); they are marked \"provenance\": \"unverified\" on the entry itself. Scope: real facilities only, following the census universe (Sea 39 / Land 32 facilities; this file lists the 55 that hold coordinates). Dictionary rows that are plan-item labels (entry/exit, purchases, rests, meals, movement) and test residue are excluded even when they carry coordinates. Parkwide shows and harbor shows listed here carry the entrance-area representative point (see area-points.json), not a name-matched location — that is by design (§10 parkwide rule).",
+ "exported_at": "2026-11-18",
+ "counts": {
+  "sea": 37,
+  "land": 18,
+  "total": 55
+ },
+ "facilities": [
+  {
+   "name": "ヴェネツィアン・ゴンドラ",
+   "park": "sea",
+   "area": "メディテレーニアンハーバー",
+   "lat": 35.626147,
+   "lng": 139.8879186
+  },
+  {
+   "name": "スパークリング・ジュビリー・セレブレーション",
+   "park": "sea",
+   "area": "メディテレーニアンハーバー",
+   "lat": 35.6264517,
+   "lng": 139.8869221
+  },
+  {
+   "name": "ソアリン：ファンタスティック・フライト",
+   "park": "sea",
+   "area": "メディテレーニアンハーバー",
+   "lat": 35.627691,
+   "lng": 139.885425
+  },
+  {
+   "name": "ディズニー・クリスマス・グリーティング",
+   "park": "sea",
+   "area": "メディテレーニアンハーバー",
+   "lat": 35.6264517,
+   "lng": 139.8869221
+  },
+  {
+   "name": "カフェ・ポルトフィーノ",
+   "park": "sea",
+   "area": "メディテレーニアンハーバー",
+   "lat": 35.6270253,
+   "lng": 139.8870537
+  },
+  {
+   "name": "タートル・トーク",
+   "park": "sea",
+   "area": "アメリカンウォーターフロント",
+   "lat": 35.623324,
+   "lng": 139.887468
+  },
+  {
+   "name": "トイ・ストーリー・マニア！",
+   "park": "sea",
+   "area": "アメリカンウォーターフロント",
+   "lat": 35.624583,
+   "lng": 139.88912
+  },
+  {
+   "name": "タワー・オブ・テラー",
+   "park": "sea",
+   "area": "アメリカンウォーターフロント",
+   "lat": 35.624096,
+   "lng": 139.888268
+  },
+  {
+   "name": "ニューヨーク・デリ",
+   "park": "sea",
+   "area": "アメリカンウォーターフロント",
+   "lat": 35.6253888,
+   "lng": 139.8878656
+  },
+  {
+   "name": "ビリーヴ！～シー・オブ・ドリームス～",
+   "park": "sea",
+   "area": "メディテレーニアンハーバー",
+   "lat": 35.6264517,
+   "lng": 139.8869221
+  },
+  {
+   "name": "スターブライト・クリスマス",
+   "park": "sea",
+   "area": "パークワイド",
+   "lat": 35.6264517,
+   "lng": 139.8869221
+  },
+  {
+   "name": "エンポーリオ",
+   "park": "sea",
+   "area": "メディテレーニアンハーバー",
+   "lat": 35.626882,
+   "lng": 139.887937
+  },
+  {
+   "name": "アナとエルサのフローズンジャーニー",
+   "park": "sea",
+   "area": "ファンタジースプリングス",
+   "lat": 35.629945,
+   "lng": 139.877251
+  },
+  {
+   "name": "ラプンツェルのランタンフェスティバル",
+   "park": "sea",
+   "area": "ファンタジースプリングス",
+   "lat": 35.628984,
+   "lng": 139.879654
+  },
+  {
+   "name": "フェアリー・ティンカーベルのビジーバギー",
+   "park": "sea",
+   "area": "ファンタジースプリングス",
+   "lat": 35.628281,
+   "lng": 139.877928
+  },
+  {
+   "name": "アレンデール・ロイヤルバンケット",
+   "park": "sea",
+   "area": "ファンタジースプリングス",
+   "lat": 35.629413,
+   "lng": 139.878062
+  },
+  {
+   "name": "センター・オブ・ジ・アース",
+   "park": "sea",
+   "area": "ミステリアスアイランド",
+   "lat": 35.6262272,
+   "lng": 139.8845498,
+   "provenance": "unverified"
+  },
+  {
+   "name": "海底2万マイル",
+   "park": "sea",
+   "area": "ミステリアスアイランド",
+   "lat": 35.626961,
+   "lng": 139.884472
+  },
+  {
+   "name": "シンドバッド・ストーリーブック・ヴォヤッジ",
+   "park": "sea",
+   "area": "アラビアンコースト",
+   "lat": 35.62875,
+   "lng": 139.881621
+  },
+  {
+   "name": "マジックランプシアター",
+   "park": "sea",
+   "area": "アラビアンコースト",
+   "lat": 35.6285626,
+   "lng": 139.883104
+  },
+  {
+   "name": "カスバ・フードコート",
+   "park": "sea",
+   "area": "アラビアンコースト",
+   "lat": 35.628461,
+   "lng": 139.882695
+  },
+  {
+   "name": "ニモ＆フレンズ・シーライダー",
+   "park": "sea",
+   "area": "ポートディスカバリー",
+   "lat": 35.6249184,
+   "lng": 139.8825063
+  },
+  {
+   "name": "リストランテ・ディ・カナレット",
+   "park": "sea",
+   "area": "メディテレーニアンハーバー",
+   "lat": 35.625687,
+   "lng": 139.887773
+  },
+  {
+   "name": "ダンス・ザ・グローブ！",
+   "park": "sea",
+   "area": "アメリカンウォーターフロント",
+   "lat": 35.624423,
+   "lng": 139.887676,
+   "provenance": "unverified"
+  },
+  {
+   "name": "ケープコッド・クックオフ",
+   "park": "sea",
+   "area": "アメリカンウォーターフロント",
+   "lat": 35.624612,
+   "lng": 139.885083
+  },
+  {
+   "name": "【環境演出】スパークリング・ジュビリー・ナイト",
+   "park": "sea",
+   "area": "メディテレーニアンハーバー",
+   "lat": 35.6264517,
+   "lng": 139.8869221
+  },
+  {
+   "name": "ピーターパンのネバーランドアドベンチャー",
+   "park": "sea",
+   "area": "ファンタジースプリングス",
+   "lat": 35.627859,
+   "lng": 139.8789337
+  },
+  {
+   "name": "ジャンピン・ジェリーフィッシュ",
+   "park": "sea",
+   "area": "マーメイドラグーン",
+   "lat": 35.6264458,
+   "lng": 139.8833143
+  },
+  {
+   "name": "ジャスミンのフライングカーペット",
+   "park": "sea",
+   "area": "アラビアンコースト",
+   "lat": 35.6283524,
+   "lng": 139.8810948
+  },
+  {
+   "name": "インディ・ジョーンズ・アドベンチャー：クリスタルスカルの魔宮",
+   "park": "sea",
+   "area": "ロストリバーデルタ",
+   "lat": 35.6267129,
+   "lng": 139.8806129
+  },
+  {
+   "name": "レイジングスピリッツ",
+   "park": "sea",
+   "area": "ロストリバーデルタ",
+   "lat": 35.6277111,
+   "lng": 139.8807931
+  },
+  {
+   "name": "スカイ・フル・オブ・カラーズ",
+   "park": "sea",
+   "area": "パークワイド",
+   "lat": 35.6264517,
+   "lng": 139.8869221
+  },
+  {
+   "name": "ニューデイ、ニュードリームス",
+   "park": "sea",
+   "area": "パークワイド",
+   "lat": 35.6264517,
+   "lng": 139.8869221
+  },
+  {
+   "name": "スナグリーダックリング",
+   "park": "sea",
+   "area": "ファンタジースプリングス",
+   "lat": 35.6291282,
+   "lng": 139.8786303
+  },
+  {
+   "name": "ルックアウト・クックアウト",
+   "park": "sea",
+   "area": "ファンタジースプリングス",
+   "lat": 35.6281697,
+   "lng": 139.8782511
+  },
+  {
+   "name": "ファンタジースプリングス・ギフト",
+   "park": "sea",
+   "area": "ファンタジースプリングス",
+   "lat": 35.6282401,
+   "lng": 139.8770569
+  },
+  {
+   "name": "ケープコッド・クックオフ（ショーダイニングエリア）",
+   "park": "sea",
+   "area": "アメリカンウォーターフロント",
+   "lat": 35.624612,
+   "lng": 139.885083
+  },
+  {
+   "name": "美女と野獣“魔法のものがたり”",
+   "park": "land",
+   "area": "ファンタジーランド",
+   "lat": 35.6304511,
+   "lng": 139.8778894
+  },
+  {
+   "name": "イッツ・ア・スモールワールド",
+   "park": "land",
+   "area": "ファンタジーランド",
+   "lat": 35.6304467,
+   "lng": 139.8812413
+  },
+  {
+   "name": "プーさんのハニーハント",
+   "park": "land",
+   "area": "ファンタジーランド",
+   "lat": 35.6302111,
+   "lng": 139.8805376
+  },
+  {
+   "name": "空飛ぶダンボ",
+   "park": "land",
+   "area": "ファンタジーランド",
+   "lat": 35.6314631,
+   "lng": 139.8816938
+  },
+  {
+   "name": "アリスのティーパーティー",
+   "park": "land",
+   "area": "ファンタジーランド",
+   "lat": 35.6311492,
+   "lng": 139.8809805
+  },
+  {
+   "name": "ベイマックスのハッピーライド",
+   "park": "land",
+   "area": "トゥモローランド",
+   "lat": 35.6317007,
+   "lng": 139.8788382
+  },
+  {
+   "name": "カリブの海賊",
+   "park": "land",
+   "area": "アドベンチャーランド",
+   "lat": 35.6347638,
+   "lng": 139.8813485
+  },
+  {
+   "name": "クイーン・オブ・ハートのバンケットホール",
+   "park": "land",
+   "area": "ファンタジーランド",
+   "lat": 35.6309372,
+   "lng": 139.8814195
+  },
+  {
+   "name": "ミッキーのフィルハーマジック",
+   "park": "land",
+   "area": "ファンタジーランド",
+   "lat": 35.6314952,
+   "lng": 139.8806414
+  },
+  {
+   "name": "プラザパビリオン・レストラン",
+   "park": "land",
+   "area": "ウエスタンランド",
+   "lat": 35.6328582,
+   "lng": 139.8815443
+  },
+  {
+   "name": "カントリーベア・シアター",
+   "park": "land",
+   "area": "ウエスタンランド",
+   "lat": 35.6325284,
+   "lng": 139.8824532
+  },
+  {
+   "name": "カフェ・オーリンズ",
+   "park": "land",
+   "area": "アドベンチャーランド",
+   "lat": 35.6342023,
+   "lng": 139.8811664
+  },
+  {
+   "name": "イーストサイド・カフェ",
+   "park": "land",
+   "area": "ワールドバザール",
+   "lat": 35.6345587,
+   "lng": 139.8801459
+  },
+  {
+   "name": "ザ・ダイヤモンドホースシュー",
+   "park": "land",
+   "area": "ウエスタンランド",
+   "lat": 35.6326333,
+   "lng": 139.8816527
+  },
+  {
+   "name": "ウエスタンリバー鉄道",
+   "park": "land",
+   "area": "アドベンチャーランド",
+   "lat": 35.6332414,
+   "lng": 139.8854715
+  },
+  {
+   "name": "オムニバス",
+   "park": "land",
+   "area": "ワールドバザール",
+   "lat": 35.6330125,
+   "lng": 139.8796956
+  },
+  {
+   "name": "ミッキーの家とミート・ミッキー",
+   "park": "land",
+   "area": "トゥーンタウン",
+   "lat": 35.6302495,
+   "lng": 139.8785992
+  },
+  {
+   "name": "キャプテンフックス・ギャレー",
+   "park": "land",
+   "area": "ファンタジーランド",
+   "lat": 35.6319879,
+   "lng": 139.8820402
+  }
+ ]
+}
