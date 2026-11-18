@@ -1,11 +1,13 @@
 # MANIFEST.sha256 — 配布形v2 パーツ同一性マニフェスト
 # 生成：2026-11-18（記録BH）。本家のプロジェクトからのバイト単位コピー（出所照合済み）を、
 # リポジトリに投入したコミット ba93ed41 の内容とSHA-256で再照合したステージングから生成した。
+# 更新：2026-11-18（記録BJ）。data/facility-coordinates.json を v2（全71施設＋会場4件、出所の追跡可能な座標のみ）に差し替えたため、当該エントリだけを再生成した。他の全エントリは不変で、再照合済みである。
+# リポジトリに投入したコミット ba93ed41 の内容とSHA-256で再照合したステージングから生成した。
 # 形式：<SHA-256>  <バイト数>  <リポジトリルートからの相対パス>
 # 照合方法：組み込んだパーツの全ファイルについて、この表のSHA-256と一致することを確認する（第28節・自己検証の第1層）。
 # このファイル自身は照合対象に含めない。対象は parts/ 配下の全ファイルと data/ 配下の全ファイル。
 757c1afc6c9b0fe65ebd1bbc5764cada0e92e85905dd201e38fbdfc895000e8f  2091  data/area-points.json
-ed2c39d9317408403efecbd2ba8ffd3539e96363cd10316831529e21ff0714be  10851  data/facility-coordinates.json
+50a587eda645cc5cc2f9838052b2134b4532a8e2796b5c249775aa1080965353  32369  data/facility-coordinates.json
 6914bb5e4aaa1be847d5d241db96ed29bb33cdf94e64825e3fa956f933a93c35  3051  parts/README.md
 e828666e5d505cbc481c7ddddd0d16000832fc26faf4177f3e312db2fdf1c4cc  361  parts/client/build.mjs
 c6fb34223ade689a910e81260ab130bac182c4bc6b88ea12c5f6ff2a0ad903aa  670  parts/client/index.html

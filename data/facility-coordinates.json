@@ -1,10 +1,18 @@
 {
- "provenance": "Facility coordinates held by the original app's facility dictionary (getfacilitydictionary), exported 2026-11-18. Coordinates were derived by the §10 rule (Nominatim, facility name as-is, in-park-range candidates, fixed-order variants) and verified in the 2026-11-18 full census: of the 48 facilities where both the dictionary and the rule hold coordinates, 46 matched at 0 m distance. Two entries are facility-specific values whose provenance could NOT be verified (unresolved through every step of the rule, including English names); they are marked \"provenance\": \"unverified\" on the entry itself. Scope: real facilities only, following the census universe (Sea 39 / Land 32 facilities; this file lists the 55 that hold coordinates). Dictionary rows that are plan-item labels (entry/exit, purchases, rests, meals, movement) and test residue are excluded even when they carry coordinates. Parkwide shows and harbor shows listed here carry the entrance-area representative point (see area-points.json), not a name-matched location — that is by design (§10 parkwide rule).",
+ "provenance": "Facility and venue coordinates for the distribution, v2 (record BJ, 2026-11-18). Coverage is now the FULL known universe: all 71 real facilities of the 2026-11-18 census (Tokyo DisneySea 39, Tokyo Disneyland 32) plus 4 venue entries (theaters / performance spaces that host settled shows) — 75 entries in total. Every entry carries kind (facility = the place's own point; venue = the point of the venue where the entry is staged, or the venue itself; representative = the park's entrance-area representative point for parkwide/harbor programs, which have no fixed location — see area-points.json) and a per-entry provenance naming its traceable source. Sources: the original app's facility dictionary (getfacilitydictionary, exported 2026-11-18), cross-checked by the 2026-11-18 full census (§10 Nominatim rule; of the 48 facilities where both the dictionary and the rule held coordinates, 46 matched at 0 m — the 2 exceptions are parkwide entries whose dictionary value is the representative point), plus the record-BJ completion (Nominatim venue and bounded queries, OpenStreetMap features via Overpass, Wikidata coordinates P625 — all queries recorded in the author's verification files). No coordinate in this file comes from AI memory: every point is traceable to a named source. The two entries formerly marked \"provenance\": \"unverified\" (センター・オブ・ジ・アース, ダンス・ザ・グローブ！) were corroborated by traceable sources in record BJ and no longer carry the mark; no entry in this file is unverified. Scope: real facilities and their venues only, following the census universe; dictionary rows that are plan-item labels (entry/exit, purchases, rests, meals, movement) and test residue are excluded even when they carry coordinates.",
  "exported_at": "2026-11-18",
+ "version": "v2 (record BJ)",
  "counts": {
-  "sea": 37,
-  "land": 18,
-  "total": 55
+  "sea": 39,
+  "land": 32,
+  "venues": 4,
+  "total": 75,
+  "by_kind": {
+   "facility": 55,
+   "venue": 8,
+   "representative": 12
+  },
+  "note": "sea/land count the census-universe facilities per park; the 4 venue entries (2 per park) are counted separately and are included in total and by_kind."
  },
  "facilities": [
   {
@@ -12,112 +20,144 @@
    "park": "sea",
    "area": "メディテレーニアンハーバー",
    "lat": 35.626147,
-   "lng": 139.8879186
+   "lng": 139.8879186,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "スパークリング・ジュビリー・セレブレーション",
    "park": "sea",
    "area": "メディテレーニアンハーバー",
    "lat": 35.6264517,
-   "lng": 139.8869221
+   "lng": 139.8869221,
+   "kind": "representative",
+   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule)."
   },
   {
    "name": "ソアリン：ファンタスティック・フライト",
    "park": "sea",
    "area": "メディテレーニアンハーバー",
    "lat": 35.627691,
-   "lng": 139.885425
+   "lng": 139.885425,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "ディズニー・クリスマス・グリーティング",
    "park": "sea",
    "area": "メディテレーニアンハーバー",
    "lat": 35.6264517,
-   "lng": 139.8869221
+   "lng": 139.8869221,
+   "kind": "representative",
+   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule)."
   },
   {
    "name": "カフェ・ポルトフィーノ",
    "park": "sea",
    "area": "メディテレーニアンハーバー",
    "lat": 35.6270253,
-   "lng": 139.8870537
+   "lng": 139.8870537,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "タートル・トーク",
    "park": "sea",
    "area": "アメリカンウォーターフロント",
    "lat": 35.623324,
-   "lng": 139.887468
+   "lng": 139.887468,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "トイ・ストーリー・マニア！",
    "park": "sea",
    "area": "アメリカンウォーターフロント",
    "lat": 35.624583,
-   "lng": 139.88912
+   "lng": 139.88912,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "タワー・オブ・テラー",
    "park": "sea",
    "area": "アメリカンウォーターフロント",
    "lat": 35.624096,
-   "lng": 139.888268
+   "lng": 139.888268,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "ニューヨーク・デリ",
    "park": "sea",
    "area": "アメリカンウォーターフロント",
    "lat": 35.6253888,
-   "lng": 139.8878656
+   "lng": 139.8878656,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "ビリーヴ！～シー・オブ・ドリームス～",
    "park": "sea",
    "area": "メディテレーニアンハーバー",
    "lat": 35.6264517,
-   "lng": 139.8869221
+   "lng": 139.8869221,
+   "kind": "representative",
+   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule)."
   },
   {
    "name": "スターブライト・クリスマス",
    "park": "sea",
    "area": "パークワイド",
    "lat": 35.6264517,
-   "lng": 139.8869221
+   "lng": 139.8869221,
+   "kind": "representative",
+   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule)."
   },
   {
    "name": "エンポーリオ",
    "park": "sea",
    "area": "メディテレーニアンハーバー",
    "lat": 35.626882,
-   "lng": 139.887937
+   "lng": 139.887937,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "アナとエルサのフローズンジャーニー",
    "park": "sea",
    "area": "ファンタジースプリングス",
    "lat": 35.629945,
-   "lng": 139.877251
+   "lng": 139.877251,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "ラプンツェルのランタンフェスティバル",
    "park": "sea",
    "area": "ファンタジースプリングス",
    "lat": 35.628984,
-   "lng": 139.879654
+   "lng": 139.879654,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "フェアリー・ティンカーベルのビジーバギー",
    "park": "sea",
    "area": "ファンタジースプリングス",
    "lat": 35.628281,
-   "lng": 139.877928
+   "lng": 139.877928,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "アレンデール・ロイヤルバンケット",
    "park": "sea",
    "area": "ファンタジースプリングス",
    "lat": 35.629413,
-   "lng": 139.878062
+   "lng": 139.878062,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "センター・オブ・ジ・アース",
@@ -125,49 +165,62 @@
    "area": "ミステリアスアイランド",
    "lat": 35.6262272,
    "lng": 139.8845498,
-   "provenance": "unverified"
+   "kind": "facility",
+   "provenance": "Original app facility dictionary value, formerly marked unverified; corroborated on 2026-11-18 (record BJ) by two traceable sources: Wikidata Q3186999 coordinate (P625: 35.62611111, 139.88444444) within 16 m, and OpenStreetMap node 2770576786 (name センター・オブ・ジ・アース, attraction=roller_coaster) within 66 m."
   },
   {
    "name": "海底2万マイル",
    "park": "sea",
    "area": "ミステリアスアイランド",
    "lat": 35.626961,
-   "lng": 139.884472
+   "lng": 139.884472,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "シンドバッド・ストーリーブック・ヴォヤッジ",
    "park": "sea",
    "area": "アラビアンコースト",
    "lat": 35.62875,
-   "lng": 139.881621
+   "lng": 139.881621,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "マジックランプシアター",
    "park": "sea",
    "area": "アラビアンコースト",
    "lat": 35.6285626,
-   "lng": 139.883104
+   "lng": 139.883104,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "カスバ・フードコート",
    "park": "sea",
    "area": "アラビアンコースト",
    "lat": 35.628461,
-   "lng": 139.882695
+   "lng": 139.882695,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "ニモ＆フレンズ・シーライダー",
    "park": "sea",
    "area": "ポートディスカバリー",
    "lat": 35.6249184,
-   "lng": 139.8825063
+   "lng": 139.8825063,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "リストランテ・ディ・カナレット",
    "park": "sea",
    "area": "メディテレーニアンハーバー",
    "lat": 35.625687,
-   "lng": 139.887773
+   "lng": 139.887773,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "ダンス・ザ・グローブ！",
@@ -175,224 +228,467 @@
    "area": "アメリカンウォーターフロント",
    "lat": 35.624423,
    "lng": 139.887676,
-   "provenance": "unverified"
+   "kind": "venue",
+   "provenance": "Venue point of ウォーターフロントパーク (American Waterfront), this show's performance venue. The original app dictionary value (formerly marked unverified) is identical within 0.01 m to the Nominatim point of ウォーターフロントパーク (way 659417310), queried 2026-11-18 (record BJ)."
   },
   {
    "name": "ケープコッド・クックオフ",
    "park": "sea",
    "area": "アメリカンウォーターフロント",
    "lat": 35.624612,
-   "lng": 139.885083
+   "lng": 139.885083,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "【環境演出】スパークリング・ジュビリー・ナイト",
    "park": "sea",
    "area": "メディテレーニアンハーバー",
    "lat": 35.6264517,
-   "lng": 139.8869221
+   "lng": 139.8869221,
+   "kind": "representative",
+   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule)."
   },
   {
    "name": "ピーターパンのネバーランドアドベンチャー",
    "park": "sea",
    "area": "ファンタジースプリングス",
    "lat": 35.627859,
-   "lng": 139.8789337
+   "lng": 139.8789337,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "ジャンピン・ジェリーフィッシュ",
    "park": "sea",
    "area": "マーメイドラグーン",
    "lat": 35.6264458,
-   "lng": 139.8833143
+   "lng": 139.8833143,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "ジャスミンのフライングカーペット",
    "park": "sea",
    "area": "アラビアンコースト",
    "lat": 35.6283524,
-   "lng": 139.8810948
+   "lng": 139.8810948,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "インディ・ジョーンズ・アドベンチャー：クリスタルスカルの魔宮",
    "park": "sea",
    "area": "ロストリバーデルタ",
    "lat": 35.6267129,
-   "lng": 139.8806129
+   "lng": 139.8806129,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "レイジングスピリッツ",
    "park": "sea",
    "area": "ロストリバーデルタ",
    "lat": 35.6277111,
-   "lng": 139.8807931
+   "lng": 139.8807931,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "スカイ・フル・オブ・カラーズ",
    "park": "sea",
    "area": "パークワイド",
    "lat": 35.6264517,
-   "lng": 139.8869221
+   "lng": 139.8869221,
+   "kind": "representative",
+   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule). A name-matched Nominatim node exists about 515 m away and is rejected by the parkwide rule (§25 case 32)."
   },
   {
    "name": "ニューデイ、ニュードリームス",
    "park": "sea",
    "area": "パークワイド",
    "lat": 35.6264517,
-   "lng": 139.8869221
+   "lng": 139.8869221,
+   "kind": "representative",
+   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule)."
   },
   {
    "name": "スナグリーダックリング",
    "park": "sea",
    "area": "ファンタジースプリングス",
    "lat": 35.6291282,
-   "lng": 139.8786303
+   "lng": 139.8786303,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "ルックアウト・クックアウト",
    "park": "sea",
    "area": "ファンタジースプリングス",
    "lat": 35.6281697,
-   "lng": 139.8782511
+   "lng": 139.8782511,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "ファンタジースプリングス・ギフト",
    "park": "sea",
    "area": "ファンタジースプリングス",
    "lat": 35.6282401,
-   "lng": 139.8770569
+   "lng": 139.8770569,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "ケープコッド・クックオフ（ショーダイニングエリア）",
    "park": "sea",
    "area": "アメリカンウォーターフロント",
    "lat": 35.624612,
-   "lng": 139.885083
+   "lng": 139.885083,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "美女と野獣“魔法のものがたり”",
    "park": "land",
    "area": "ファンタジーランド",
    "lat": 35.6304511,
-   "lng": 139.8778894
+   "lng": 139.8778894,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "イッツ・ア・スモールワールド",
    "park": "land",
    "area": "ファンタジーランド",
    "lat": 35.6304467,
-   "lng": 139.8812413
+   "lng": 139.8812413,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "プーさんのハニーハント",
    "park": "land",
    "area": "ファンタジーランド",
    "lat": 35.6302111,
-   "lng": 139.8805376
+   "lng": 139.8805376,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "空飛ぶダンボ",
    "park": "land",
    "area": "ファンタジーランド",
    "lat": 35.6314631,
-   "lng": 139.8816938
+   "lng": 139.8816938,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "アリスのティーパーティー",
    "park": "land",
    "area": "ファンタジーランド",
    "lat": 35.6311492,
-   "lng": 139.8809805
+   "lng": 139.8809805,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "ベイマックスのハッピーライド",
    "park": "land",
    "area": "トゥモローランド",
    "lat": 35.6317007,
-   "lng": 139.8788382
+   "lng": 139.8788382,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "カリブの海賊",
    "park": "land",
    "area": "アドベンチャーランド",
    "lat": 35.6347638,
-   "lng": 139.8813485
+   "lng": 139.8813485,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "クイーン・オブ・ハートのバンケットホール",
    "park": "land",
    "area": "ファンタジーランド",
    "lat": 35.6309372,
-   "lng": 139.8814195
+   "lng": 139.8814195,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "ミッキーのフィルハーマジック",
    "park": "land",
    "area": "ファンタジーランド",
    "lat": 35.6314952,
-   "lng": 139.8806414
+   "lng": 139.8806414,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "プラザパビリオン・レストラン",
    "park": "land",
    "area": "ウエスタンランド",
    "lat": 35.6328582,
-   "lng": 139.8815443
+   "lng": 139.8815443,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "カントリーベア・シアター",
    "park": "land",
    "area": "ウエスタンランド",
    "lat": 35.6325284,
-   "lng": 139.8824532
+   "lng": 139.8824532,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "カフェ・オーリンズ",
    "park": "land",
    "area": "アドベンチャーランド",
    "lat": 35.6342023,
-   "lng": 139.8811664
+   "lng": 139.8811664,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "イーストサイド・カフェ",
    "park": "land",
    "area": "ワールドバザール",
    "lat": 35.6345587,
-   "lng": 139.8801459
+   "lng": 139.8801459,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "ザ・ダイヤモンドホースシュー",
    "park": "land",
    "area": "ウエスタンランド",
    "lat": 35.6326333,
-   "lng": 139.8816527
+   "lng": 139.8816527,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "ウエスタンリバー鉄道",
    "park": "land",
    "area": "アドベンチャーランド",
    "lat": 35.6332414,
-   "lng": 139.8854715
+   "lng": 139.8854715,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "オムニバス",
    "park": "land",
    "area": "ワールドバザール",
    "lat": 35.6330125,
-   "lng": 139.8796956
+   "lng": 139.8796956,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "ミッキーの家とミート・ミッキー",
    "park": "land",
    "area": "トゥーンタウン",
    "lat": 35.6302495,
-   "lng": 139.8785992
+   "lng": 139.8785992,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
   },
   {
    "name": "キャプテンフックス・ギャレー",
    "park": "land",
    "area": "ファンタジーランド",
    "lat": 35.6319879,
-   "lng": 139.8820402
+   "lng": 139.8820402,
+   "kind": "facility",
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+  },
+  {
+   "name": "ディズニーシー・エレクトリックレールウェイ（ポートディスカバリー）",
+   "park": "sea",
+   "area": "ポートディスカバリー",
+   "lat": 35.6250071,
+   "lng": 139.8856057,
+   "kind": "facility",
+   "provenance": "Settled by the §10 Nominatim rule in the 2026-11-18 full census (step 2b, shortened form ディズニーシー・エレクトリックレールウェイ); the original dictionary held no coordinates for this facility."
+  },
+  {
+   "name": "ドリームス・テイク・フライト",
+   "park": "sea",
+   "area": "ロストリバーデルタ",
+   "lat": 35.6257667,
+   "lng": 139.8825777,
+   "kind": "venue",
+   "provenance": "Venue point of ハンガーステージ (Lost River Delta), the venue named for this show in official Tokyo Disney Resort sources; Nominatim way 222615180 (amenity=theatre), queried 2026-11-18 (record BJ)."
+  },
+  {
+   "name": "モンスターズ・インク“ライド＆ゴーシーク！”",
+   "park": "land",
+   "area": "トゥモローランド",
+   "lat": 35.6339596,
+   "lng": 139.8783588,
+   "kind": "facility",
+   "provenance": "Nominatim bounded search (Land viewbox), 2026-11-18: way 217930681 (name モンスターズ・インク“ライドゴーシーク”, attraction=dark_ride); the same way's Overpass center lies within 4.8 m, and Wikidata Q6902878 (P625, coarse precision) within about 63 m (record BJ)."
+  },
+  {
+   "name": "キャッスルカルーセル",
+   "park": "land",
+   "area": "ファンタジーランド",
+   "lat": 35.6313864,
+   "lng": 139.881256,
+   "kind": "facility",
+   "provenance": "Settled by the §10 Nominatim rule in the 2026-11-18 full census (step 1; matched candidate name キャッスルカールセル); the original dictionary held no coordinates for this facility."
+  },
+  {
+   "name": "ミニー＠ファンダーランド",
+   "park": "land",
+   "area": "パークワイド",
+   "lat": 35.6343228,
+   "lng": 139.8795861,
+   "kind": "representative",
+   "provenance": "Park representative point (World Bazaar point; see area-points.json). Parade-route / parkwide program with no fixed venue (§10 parkwide rule); settled in record BJ, 2026-11-18."
+  },
+  {
+   "name": "トイズ・ワンダラス・クリスマス！",
+   "park": "land",
+   "area": "パークワイド",
+   "lat": 35.6343228,
+   "lng": 139.8795861,
+   "kind": "representative",
+   "provenance": "Park representative point (World Bazaar point; see area-points.json). Parade-route / parkwide program with no fixed venue (§10 parkwide rule); settled in record BJ, 2026-11-18."
+  },
+  {
+   "name": "ディズニー・ハーモニー・イン・カラー",
+   "park": "land",
+   "area": "パークワイド",
+   "lat": 35.6343228,
+   "lng": 139.8795861,
+   "kind": "representative",
+   "provenance": "Park representative point (World Bazaar point; see area-points.json). Parade-route / parkwide program with no fixed venue (§10 parkwide rule); settled in record BJ, 2026-11-18."
+  },
+  {
+   "name": "ミッキーのマジカルミュージックワールド",
+   "park": "land",
+   "area": "ファンタジーランド",
+   "lat": 35.6313055,
+   "lng": 139.8773417,
+   "kind": "venue",
+   "provenance": "Venue point of ファンタジーランド・フォレストシアター (Fantasyland), this show's theater in official Tokyo Disney Resort sources; Nominatim way 754497694 (amenity=theatre), queried 2026-11-18 (record BJ)."
+  },
+  {
+   "name": "東京ディズニーランド・エレクトリカルパレード・ドリームライツ",
+   "park": "land",
+   "area": "パークワイド",
+   "lat": 35.6343228,
+   "lng": 139.8795861,
+   "kind": "representative",
+   "provenance": "Park representative point (World Bazaar point; see area-points.json). Parade-route / parkwide program with no fixed venue (§10 parkwide rule); settled in record BJ, 2026-11-18. A name-matched Nominatim node exists (35.6332582, 139.8807865, census step 1) but the parkwide rule takes precedence, as with スカイ・フル・オブ・カラーズ."
+  },
+  {
+   "name": "スターブライト・クリスマス",
+   "park": "land",
+   "area": "パークワイド",
+   "lat": 35.6343228,
+   "lng": 139.8795861,
+   "kind": "representative",
+   "provenance": "Park representative point (World Bazaar point; see area-points.json). Parade-route / parkwide program with no fixed venue (§10 parkwide rule); settled in record BJ, 2026-11-18."
+  },
+  {
+   "name": "ピーターパン空の旅",
+   "park": "land",
+   "area": "ファンタジーランド",
+   "lat": 35.6319367,
+   "lng": 139.8817773,
+   "kind": "facility",
+   "provenance": "OpenStreetMap node 13713865570 via Overpass, 2026-11-18: name ピーターパン空の旅, attraction=dark_ride, Wikidata Q2916451, official Tokyo Disneyland website in its tags (record BJ)."
+  },
+  {
+   "name": "ジャンボリミッキー！レッツ・ダンス！",
+   "park": "land",
+   "area": "アドベンチャーランド",
+   "lat": 35.634254,
+   "lng": 139.8817086,
+   "kind": "venue",
+   "provenance": "Venue point of シアターオーリンズ (Adventureland), this show's stage in official Tokyo Disney Resort sources; Nominatim way 217842054 (amenity=theatre), queried 2026-11-18 (record BJ)."
+  },
+  {
+   "name": "センターストリート・コーヒーハウス",
+   "park": "land",
+   "area": "ワールドバザール",
+   "lat": 35.6342033,
+   "lng": 139.8791317,
+   "kind": "facility",
+   "provenance": "Settled by the §10 Nominatim rule in the 2026-11-18 full census (step 1); identical to OpenStreetMap node 3692911385 (Overpass, 2026-11-18). The original dictionary held no coordinates for this facility."
+  },
+  {
+   "name": "ホーンテッドマンション",
+   "park": "land",
+   "area": "ファンタジーランド",
+   "lat": 35.6305519,
+   "lng": 139.8821407,
+   "kind": "facility",
+   "provenance": "Settled by the §10 Nominatim rule in the 2026-11-18 full census (step 1); the original dictionary held no coordinates for this facility."
+  },
+  {
+   "name": "ジャングルクルーズ：ワイルドライフ・エクスペディション",
+   "park": "land",
+   "area": "アドベンチャーランド",
+   "lat": 35.6339528,
+   "lng": 139.8824076,
+   "kind": "facility",
+   "provenance": "Settled by the §10 Nominatim rule in the 2026-11-18 full census (step 2b, shortened form ジャングルクルーズ); the original dictionary held no coordinates for this facility."
+  },
+  {
+   "name": "魅惑のチキルーム：スティッチ・プレゼンツ“アロハ・エ・コモ・マイ！”",
+   "park": "land",
+   "area": "アドベンチャーランド",
+   "lat": 35.6331122,
+   "lng": 139.882374,
+   "kind": "facility",
+   "provenance": "Settled by the §10 Nominatim rule in the 2026-11-18 full census (step 1); the original dictionary held no coordinates for this facility."
+  },
+  {
+   "name": "ハンガーステージ",
+   "park": "sea",
+   "area": "ロストリバーデルタ",
+   "lat": 35.6257667,
+   "lng": 139.8825777,
+   "kind": "venue",
+   "provenance": "Venue entry. Nominatim way 222615180 (amenity=theatre); Japanese and English name queries agree (2026-11-18, record BJ)."
+  },
+  {
+   "name": "ウォーターフロントパーク",
+   "park": "sea",
+   "area": "アメリカンウォーターフロント",
+   "lat": 35.6244229,
+   "lng": 139.8876761,
+   "kind": "venue",
+   "provenance": "Venue entry (open-air performance space). Nominatim way 659417310 (leisure=park), queried 2026-11-18 (record BJ)."
+  },
+  {
+   "name": "ファンタジーランド・フォレストシアター",
+   "park": "land",
+   "area": "ファンタジーランド",
+   "lat": 35.6313055,
+   "lng": 139.8773417,
+   "kind": "venue",
+   "provenance": "Venue entry. Nominatim way 754497694 (amenity=theatre); Japanese and English name queries agree (2026-11-18, record BJ)."
+  },
+  {
+   "name": "シアターオーリンズ",
+   "park": "land",
+   "area": "アドベンチャーランド",
+   "lat": 35.634254,
+   "lng": 139.8817086,
+   "kind": "venue",
+   "provenance": "Venue entry. Nominatim way 217842054 (amenity=theatre), queried 2026-11-18 (record BJ)."
   }
  ]
 }
