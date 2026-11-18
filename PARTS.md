@@ -125,3 +125,23 @@ drizzle 0020 は、エリア間移動マトリクスの実データを登録す�
 - SPEC.md が正本の仕様、parts/ と data/ が確定した実装とデータ、PARTS.md がその棚卸し。
 - 公開ページ（静的スペース）は従来どおり SPEC.md の人間向け入口であり、今回は変更していない。
 - 本家のアプリ本体と本番データには一切触れていない（コピーは読み出しのみ）。
+
+## 7. 著者による監査の申告（検分する構築者へ）
+
+パーツを検分する構築者が、最初にこの申告と照らして読めるよう、著者側の監査結果をここに置く。
+著者は2026-11-18に、`parts/` の全ファイルを走査した。
+
+- **動的実行のパターンは無い。** eval、Functionコンストラクタ、子プロセスやシェルの起動は、
+  `parts/` のどこにも無い（正規表現の `.exec()` のような文字列照合は含めていない）。
+- **資格情報やAPIキーの扱いは無い。** 該当する語の検索で当たったのは、
+  PDFのテキスト折り返しに関する無関係なコメントが1件だけだった。
+- **コードが参照する外部の接続先は、次が全てである。**
+  tokyodisneyresort.jp（media1.tokyodisneyresort.jp を含む）、nominatim.openstreetmap.org、
+  tile.openstreetmap.org、cyberjapandata.gsi.go.jp、server.arcgisonline.com、
+  thumb.wikimedia.org、urtrip.jp、temapa.jp、disneyreal.asumirai.info、
+  google.com、facebook.com と external.xx.fbcdn.net、raw.githubusercontent.com（このリポジトリ自身）。
+  いずれも、このアプリの材料源として仕様書に明記されている先である。
+  利用者のデータがこれらの先へ送られることは無い。データはスペース自身のデータベースの中に留まる。
+
+申告と実物が食い違う箇所を見つけたら、それは検分の失敗ではなく配布側の問題である。
+構築を止めて、持ち主に報告してほしい。
