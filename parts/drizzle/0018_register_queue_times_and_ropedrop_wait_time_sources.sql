@@ -5,3 +5,7 @@
 -- and their registrations exist only in the database. Record BQ
 -- (2026-11-20) removed the fixed inserts; this migration is kept as a
 -- no-op so the migration sequence is unchanged.
+-- A single no-op statement is kept because a migration file with
+-- no statement at all is rejected by the migration runner
+-- (record BR, found by the rebuild-3 build).
+SELECT 1;

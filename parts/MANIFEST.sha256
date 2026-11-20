@@ -1,9 +1,9 @@
 # MANIFEST.sha256 — 配布形v2 パーツ同一性マニフェスト
 # 生成：2026-11-18（記録BH）。本家のプロジェクトからのバイト単位コピー（出所照合済み）を、
 # リポジトリに投入したコミット ba93ed41 の内容とSHA-256で再照合したステージングから生成した。
-# 更新：2026-11-20（記録BQ）。parts/server/src/actions.ts（本家の修正の反映）と parts/drizzle/0018（固定登録の除去）を更新し、parts/server/src/facility_seed.ts を追加した。他の全エントリは不変で、再照合済みである。
+# 更新：2026-11-20（記録BR）。parts/server/src/actions.ts（クラス12の置き場所の修正）と parts/drizzle/0018（何もしない文の追加）を更新した。他の全エントリは不変で、再照合済みである。
 # リポジトリに投入したコミット ba93ed41 の内容とSHA-256で再照合したステージングから生成した。
-# 更新：2026-11-20（記録BQ）。parts/server/src/actions.ts（本家の修正の反映）と parts/drizzle/0018（固定登録の除去）を更新し、parts/server/src/facility_seed.ts を追加した。他の全エントリは不変で、再照合済みである。
+# 更新：2026-11-20（記録BR）。parts/server/src/actions.ts（クラス12の置き場所の修正）と parts/drizzle/0018（何もしない文の追加）を更新した。他の全エントリは不変で、再照合済みである。
 # 形式：<SHA-256>  <バイト数>  <リポジトリルートからの相対パス>
 # 照合方法：組み込んだパーツの全ファイルについて、この表のSHA-256と一致することを確認する（第28節・自己検証の第1層）。
 # このファイル自身は照合対象に含めない。対象は parts/ 配下の全ファイルと data/ 配下の全ファイル。
@@ -37,7 +37,7 @@ f51fde0decbf0c6101bd52d4e3679673732d528d01f19b42a738fedbe38eb704  936  parts/dri
 c6d51c78ca91dc18f4f78160fa467035e9f456f5c405cb1619d5315dc1229426  140  parts/drizzle/0015_add_verification_record_and_dpa_purchase_time.sql
 6f4e6a2e3f867de1c1097193ce4d3187f4aff00c16e0090806a4dcece9b8b8bf  715  parts/drizzle/0016_clear_set_6_rebuild_marker.sql
 be572ea566fd1de31fdabcd97ea8eb824bf66b4611106f7ea9ffd20db52d9f97  61  parts/drizzle/0017_add_dpa_snapshot_text.sql
-ddd4a62c416a915b535c6edcee886406866768de0e1648885e68b82f5db79fae  450  parts/drizzle/0018_register_queue_times_and_ropedrop_wait_time_sources.sql
+9dfdf2da277dfbe094953b7005f4cce9823ed93b3d731fb5397eea855c876c5e  631  parts/drizzle/0018_register_queue_times_and_ropedrop_wait_time_sources.sql
 bf5b01ade8862d622af81d4f70e5d1c4bdbf0e8d5df9e5fe0d9c385095305a22  863  parts/drizzle/0019_add_walking_speed_and_travel_times.sql
 d1bcd3438041a1d07728aa9b7e8338906834eda61d4e8b841ecf1dcee2ae5b83  15601  parts/drizzle/0020_register_area_travel_matrix_real_data.sql
 7b71d743df4ce7cd86b1a9df9c158c8cafeb9dbc62255d4ec0f5e5e436f036f1  491  parts/drizzle/0021_add_same_day_search.sql
@@ -56,7 +56,7 @@ ae63b67617943c2dc533379f396499ed82d52f19bd9b85b382442ac84878d9e2  62  parts/driz
 ceffae5aedf8d7a5f7e584918020ed50b037772a8f18f5dd5ab3894d5642787c  145  parts/drizzle/0034_add_generation_escape_state.sql
 7f8f81e69650ef1c6a2bee1d03fcf3d92e253cbfeeb1e1ea61011d2d1e95d0d3  5424  parts/drizzle/meta/_journal.json
 b04db66662cf5896b0db58cbbea583473ab035743aef45daa9829517e8752757  953  parts/package.json
-aae4c78afb5aea5d75bdeeabff2fdf1ab5c20f8eb82057c0334b3b1057541bd7  818515  parts/server/src/actions.ts
+30b4f0e504675a8315b834eea8c9034bb28a231f57124421dd6d27e044923dcb  818515  parts/server/src/actions.ts
 4542cb92ea6b890536f574c2ebbbefb8ccbbf882b1a0fd8e3bc662c67fe9905c  16267  parts/server/src/facility_seed.ts
 f79a823cc26c00954f6180cf3bca4c6e96d9a49f3c410b9eb4625077a2bd0fef  49668  parts/server/src/schema.ts
 f418d983a5fb0a39fe7b188fd65328f38bcab2d75f0a2d3c6fa867ab151d737a  43411  parts/server/src/task-manager.js

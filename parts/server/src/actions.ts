@@ -1701,22 +1701,7 @@ out.push(
 `プラン${plan.slot}: 費用合計（estimatedCostJpy）が計算されていません（${tag}）。`,
 );
 }
-
-// Class 12 — the ticket line of the breakdown must be costed for
-// THIS set's snapshot party (spec §9.2).
-violations.push(
-...ticketLinePartyViolations(
-plan.slot,
-plan.costBreakdown,
-set.setType === "same_day" && set.sameDayAdults != null
-? { adults: set.sameDayAdults, children: set.sameDayChildren ?? 0 }
-: (snapshotParty ??
-(formParty
-? { adults: formParty.adults, children: formParty.children }
-: null)),
-args.ticketPrices,
-),
-);if (
+if (
 opts.ticketFloorJpy != null &&
 plan.estimatedCostJpy != null &&
 plan.estimatedCostJpy > 0 &&
@@ -12117,6 +12102,21 @@ violations.push(
 `プラン${plan.slot}: 費用合計（${plan.estimatedCostJpy.toLocaleString("ja-JP")}円）が、条件の予算（${snapshotBudgetJpy.toLocaleString("ja-JP")}円）を超えているのに、予算超過の開示が提出に含まれていません（予算対応の不一致・クラス13）。予算超過を開示する文面を budgetDisclosure として渡し、同じ開示をプランの説明（summary）にも含めて再保存してください。予算内に収まる場合は、合計が予算以下になるよう組み直してください。`,
 );
 }
+// Class 12 — the ticket line of the breakdown must be costed for
+// THIS set's snapshot party (spec §9.2).
+violations.push(
+...ticketLinePartyViolations(
+plan.slot,
+plan.costBreakdown,
+set.setType === "same_day" && set.sameDayAdults != null
+? { adults: set.sameDayAdults, children: set.sameDayChildren ?? 0 }
+: (snapshotParty ??
+(formParty
+? { adults: formParty.adults, children: formParty.children }
+: null)),
+args.ticketPrices,
+),
+);
 }
 if (violations.length > 0) {
 throw new Error(
