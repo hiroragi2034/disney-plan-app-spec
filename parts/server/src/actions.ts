@@ -6600,7 +6600,15 @@ async function closeOpenRunLog(
 // planSetId (they are addressed by park / date / URL), so — exactly
 // like the save attempts, which the server brackets itself — a
 // server action called while a run is open records into the newest
-// open run, and records nothing when no run is open.
+// open run, and records nothing when no run is open. Runs whose set
+// has already reached its end are NOT write targets: a finished
+// set's run is only awaiting closure, and writing into it would
+// both contaminate that run's record with unrelated work and keep
+// resetting the sweep's silence window, so the run would stay open
+// far past its own end. A run is live while its set is generating,
+// or — for a partial replacement on a completed set — while the
+// replaced slot is still generating (the same liveness the getState
+// sweep uses when it decides which open runs to leave alone).
 async function findAnyOpenRun(
   ctx: Ctx,
 ): Promise<{ id: number; currentPhase: string | null } | null> {
@@ -6609,12 +6617,35 @@ async function findAnyOpenRun(
     .select({
       id: schema.runLogs.id,
       currentPhase: schema.runLogs.currentPhase,
+      planSetId: schema.runLogs.planSetId,
+      kind: schema.runLogs.kind,
+      slot: schema.runLogs.slot,
     })
     .from(schema.runLogs)
     .where(eq(schema.runLogs.status, "open"))
-    .orderBy(desc(schema.runLogs.id))
-    .limit(1);
-  return runs[0] ?? null;
+    .orderBy(desc(schema.runLogs.id));
+  for (const run of runs) {
+    const setRows = await db
+      .select()
+      .from(schema.planSets)
+      .where(eq(schema.planSets.id, run.planSetId))
+      .limit(1);
+    const set = setRows[0];
+    if (!set) continue;
+    if (set.status === "generating") return run;
+    if (
+      set.status === "done" &&
+      run.kind === "partial" &&
+      (run.slot === "A"
+        ? set.progressA
+        : run.slot === "B"
+          ? set.progressB
+          : set.progressC) === "generating"
+    ) {
+      return run;
+    }
+  }
+  return null;
 }
 
 // The inside of one page read, as stamped by the reading
@@ -16314,7 +16345,7 @@ detail: reason,
 if (wasGenerating) {
 await db.insert(schema.messages).values({
 role: "assistant",
-text: `「${set.title}」のプラン作成はできませんでした。（対象条件: ${setConditionsSummary(set)}／理由: ${reason}）プランは何も保存されていません。`,
+text: `「${set.title}」のプラン作成はできませんでした。（対象条件: ${setConditionsSummary(set)}／理由: ${reason}）プランは何も保存されていません。\n${SPEC_REPAIR_GUIDANCE}`,
 });
 }
 ctx.invalidateQueries();
@@ -17903,7 +17934,7 @@ pendingOpsJson: pendingOpsJsonWith(set.pendingOpsJson, slot, null),
 .where(eq(schema.planSets.id, set.id));
 await db.insert(schema.messages).values({
 role: "assistant",
-text: `「${set.title}」のプラン${slot}の差し替えは保存されませんでした。（対象条件: ${setConditionsSummary(set)}／理由: ${reason}）元のプラン${slot}はそのまま残っています。`,
+text: `「${set.title}」のプラン${slot}の差し替えは保存されませんでした。（対象条件: ${setConditionsSummary(set)}／理由: ${reason}）元のプラン${slot}はそのまま残っています。\n${SPEC_REPAIR_GUIDANCE}`,
 });
 // 過程記録： a class-11 refusal within a partial replacement is
 // NOT terminal (the task may fix and re-save in this operation),
@@ -18949,7 +18980,7 @@ args.slot === "A"
 .where(eq(schema.planSets.id, set.id));
 await db.insert(schema.messages).values({
 role: "assistant",
-text: `プラン${args.slot}の差し替えはできませんでした。（理由: ${args.error}）元のプラン${args.slot}はそのまま残っています。`,
+text: `プラン${args.slot}の差し替えはできませんでした。（理由: ${args.error}）元のプラン${args.slot}はそのまま残っています。\n現在の公式情報を確認できなかったため、${SPEC_REPAIR_GUIDANCE}`,
 });
 }
 // 過程記録： close this slot's run with the reported reason.
