@@ -9,22 +9,27 @@
 
 ## 1. 切り出したもの（parts/）
 
-すべて本家アプリ（スペース `deizuniji-hua-apuri`）のプロジェクト
-`~/workspace/ts-spaces/deizuniji-hua-apuri/` からのバイト単位のコピーである。
-書き換えはしていない。コピー時に全ファイルのSHA-256を出所と照合した（不一致0件）。
+すべて本家アプリ（現在の本家スペース）の現在のソースから作る。
+2026-11-21以降は、本家＝開発種別、配布パーツ＝本番種別として、
+種別の定義（記録BV）に従って機械的に生成する。欠陥はパーツ側で
+継ぎ足し修正せず、本家側で直してから生成し直す。生成時に、
+開発種別だけの部分（デバッグタブとそのアクション・テーブル、
+タスク管理タブの画面、チャット内のデバッグ実行の入口）は取り除き、
+デバッグ専用の移行（0039〜0044）は連番を保ったまま空にし、
+移行0018は待ち時間参考サイトを登録しない形にする。それ以外は
+本家のコードそのままである。
 
 | パーツ | リポジトリ内パス | 出所 | バイト数 |
 |---|---|---|---|
 | 地図層（仮想地図ライブラリ） | `parts/client/src/map_helpers.mjs` | `client/src/map_helpers.mjs` | 31,120 |
-| クライアント全体 | `parts/client/src/App.tsx` | `client/src/App.tsx` | 255,330 |
-| PDF生成 | `parts/client/src/pdf.ts` | `client/src/pdf.ts` | 68,375 |
-| プラン集計 | `parts/client/src/plan_metrics.ts` | `client/src/plan_metrics.ts` | 10,230 |
-| クライアント配管・スタイル | `parts/client/src/{api.ts, main.tsx, theme.css, globals.d.ts}`、`parts/client/{index.html, build.mjs}` | 同名パス | 計9,624 |
-| サーバー全体（決定的ロジックを含む） | `parts/server/src/actions.ts` | `server/src/actions.ts` | 818,515 |
-| 辞書の種（リセット時の初期状態の復元） | `parts/server/src/facility_seed.ts` | `server/src/facility_seed.ts`（2026-11-20、記録BQ） | 16,267 |
-| タスク管理クラス | `parts/server/src/task-manager.js` | `server/src/actions.ts` のタスク管理部分の最終形の書き出し（2026-11-20、記録BP） | 43,393 |
-| データモデル | `parts/server/src/schema.ts` | `server/src/schema.ts` | 49,668 |
-| スキーマ移行（SQL 34本＋ジャーナル） | `parts/drizzle/` | `drizzle/` | 計35,151 |
+| クライアント全体 | `parts/client/src/App.tsx` | `client/src/App.tsx` | 263,655 |
+| PDF生成 | `parts/client/src/pdf.ts` | `client/src/pdf.ts` | 68,365 |
+| プラン集計 | `parts/client/src/plan_metrics.ts` | `client/src/plan_metrics.ts` | 10,301 |
+| クライアント配管・スタイル | `parts/client/src/{api.ts, main.tsx, theme.css, globals.d.ts}`、`parts/client/{index.html, build.mjs}` | 同名パス | 計9,588 |
+| サーバー全体（決定的ロジック・タスク管理クラス・取得計画・実行ログを含む） | `parts/server/src/actions.ts` | `server/src/actions.ts` | 1,040,006 |
+| 辞書の種（リセット時の初期状態の復元） | `parts/server/src/facility_seed.ts` | `server/src/facility_seed.ts` | 16,280 |
+| データモデル | `parts/server/src/schema.ts` | `server/src/schema.ts` | 67,101 |
+| スキーマ移行（SQL 47本＋ジャーナル） | `parts/drizzle/` | `drizzle/` | 計84,145 |
 | 依存マニフェスト | `parts/package.json` | `package.json` | 953 |
 | パーツの説明 | `parts/README.md` | （今回作成） | — |
 
@@ -38,7 +43,7 @@
 本家ではこのファイルは分割されていないので、分割せず丸ごとコピーした
 （分割は書き換えになるため）。
 
-タスク管理クラスについて：本番のタスクの開始・再試行・強制終了を担うサーバー側のクラスである（仕様書第2.1節）。`parts/server/src/actions.ts` は2026-11-18時点のコピーであり、このクラスを含まない。クラスは単独ファイル `parts/server/src/task-manager.js` が正であり、構築ではこのファイルをサーバーに組み込み、本番の処理の開始をすべてこのクラスに通すこと。配線の方法は、actions.ts 側の開始箇所に管理クラスへの呼び出しを加えることであり、この追加は構築の手順であってパーツの書き換えには当たらない（仕様書第2.1節・記録BR）。追加した箇所は検証の記録に残すこと。ファイルの冒頭に、ホストが用意するものと組み込み口が書いてある。
+タスク管理クラスについて：本番のタスクの開始・再試行・強制終了を担うサーバー側の仕組みである（仕様書第2.1節）。2026-11-21の生成（記録BV）からは、本家の形のまま `parts/server/src/actions.ts` の中に配線済みで含まれる。単独ファイルは無くなった。構築で配線を足す必要はない。
 
 記録BQ（2026-11-20）での更新：actions.ts に、本家と再構築コピーのテストで見つけて
 本家で直した不具合の修正を反映した（反映した内容は記録BQに列挙）。あわせて、
@@ -50,6 +55,8 @@
 記録BS（2026-11-21）での更新：呼び方を「裏タスク」から「タスク」へ変更した（所有者の指示）。task-manager.js の中の表記も置き換えたため、同ファイルのバイト数が変わっている。仕組みは変えていない。
 
 記録BT（2026-11-21）での更新：再構築検証4で見つかったパーツの不具合2件を直した。待ち時間参考サイトの初期登録の定数（名称とURLを固定したもの）と、その登録処理を取り除いた（登録は構築時調査の結果としてのみ行われる）。移行0018の名称からもサイト名を取り除いた。チャットの開始判断の指示文に、金額の示されていない費用変更への聞き返しを追加した。
+
+記録BV（2026-11-21）での更新：パーツの作り方そのものを変えた（所有者の指示）。従来のパーツは2026-11-18時点の写しに修正を継ぎ足していたため、本家とのずれが繰り返し再構築の不具合になった。今後は本家の現在のソースから、種別の定義に従って毎回生成する。あわせて、待ち時間参考サイトの固定登録の定数は本家側からも取り除いた（テストT64の恒久対策）。
 
 drizzle 0020 は、エリア間移動マトリクスの実データを登録する移行であり、
 スキーマだけでなく確定データも含んでいる。そのまま含めた。
