@@ -3775,20 +3775,21 @@ return [];
 // to fix this app against the current Disney system. The in-app AI
 // cannot change the app, so the guidance is the honest hand-off.
 //
-// An unverified entry counts as spec-suspect when it concerns the
-// app's premises about the current system (DPA eligibility/prices,
-// the normalized facts, park hours, show times, closures, ticket
-// prices). Travel-leg entries （移動時間・座標が引けず） do NOT:
-// an unresolvable coordinate is a data gap, not a system change,
-// and flagging it would make the guidance noise.
-const SPEC_SUSPECT_UNVERIFIED =
-/DPA|プレミアアクセス|ファクト|営業時間|公演時刻|休止|チケット/;
-function hasSpecSuspectUnverified(unverified: string[]): boolean {
-return unverified.some(
-(u) =>
-SPEC_SUSPECT_UNVERIFIED.test(u) && !/移動時間/.test(u),
-);
-}
+// Whether the guidance attaches is decided by STATE, not by
+// matching keywords in the unverified entries' free text (spec
+// §12.8): it attaches when that run's fact build was incomplete,
+// or when an unverified entry of FACT origin remains. Unverified
+// entries are therefore classified by their ORIGIN at generation
+// time: the save and re-verification paths collect the fact-origin
+// entries (fact-gate level, park hours, show times, DPA fact
+// judgements, the row-derived §9.4 entries) into a separate
+// factUnverified list alongside the full unverified list.
+// Travel-leg and coordinate unverified entries do NOT count as
+// fact origin by classification: an unresolvable coordinate is a
+// data gap, not a system change, and flagging it would make the
+// guidance noise. Entries the task itself reported are not
+// classified by their wording either, and never enter the list.
+function factsUnconfirmed(gate: DpaFactGate, factUnverified: readonly string[]): boolean { return gate.build == null || gate.summary?.complete !== true || factUnverified.length > 0; }
 // The repair guidance itself, in the app's plain voice. Surfaces
 // add their own short lead-in so the sentence does not repeat
 // word-for-word identically everywhere it appears.
@@ -5469,7 +5470,7 @@ previousSummary,
 ]
 : []),
 `【全体の進め方（取得は辞書→一括取得→保存データから作成）】毎回すべてを最初から取り直すのが遅さの原因なので、この順序を厳守すること。(i) まず施設辞書と前回プラン（作り直しの場合）で足りる静的属性は再利用し、(ii) 不足分だけを一括取得スクリプトでまとめて取り、(iii) 計画は保存済みデータ（辞書＋今回取得して保存したデータ＋日付層の確認結果）から作る。日付で変わる情報（営業時間・休止・ショー時刻）は辞書の対象外で、対象日ごとに毎回確認する。待ち時間の推定材料も毎回新しく取る。`,
-`0. 【施設辞書の確認】最初に getFacilityDictionary アクション（park="${c.park}"）を呼び、このパークの施設辞書を読む。各エントリには静的属性（area、officialUrl、durationMin、lat/lng、hasImage）と鮮度フラグが付いている。レストランのエントリには restaurantFact（その施設の現在のファクト：serviceType＝公式ページのサービスタイプ、reservationType＝予約形態：required（予約必須）／ps（プライオリティ・シーティング対象）／none（予約なし）／unknown（未確認）、mobileOrder＝モバイルオーダー：available（対象）／not_available（対象外）／unknown（未確認）。null は有効なファクトが未登録の状態）も付いている。レストランの分類の根拠はこのファクトだけであり、エントリの reservationType／mobileOrder の値（旧来の辞書の列）は分類には一切使わないこと。coordsUsable=true の座標は無期限で有効なので再照会禁止。staticFresh=true のエリア・公式URL・公式所要時間はそのまま使う。imageFresh=true の施設は写真が辞書にあるので imageUrl を調べ直さない。取得が必要なのは、辞書に無い施設と、期限切れ（staticFresh=false）の属性だけ。ただし restaurantFact が null のレストランは、他の静的属性が新鮮でも、ファクトの登録（手順2d）だけは必要になる。`,
+`0. 【施設辞書の確認】最初に getFacilityDictionary アクション（park="${c.park}"）を呼び、このパークの施設辞書を読む。各エントリには静的属性（area、officialUrl、durationMin、lat/lng、hasImage）と鮮度フラグが付いている。レストランのエントリには restaurantFact（その施設の現在のファクト：serviceType＝公式ページのサービスタイプ、reservationType＝予約形態：required（予約必須）／ps（プライオリティ・シーティング対象）／none（予約なし）／unknown（未確認）、mobileOrder＝モバイルオーダー：available（対象）／not_available（対象外）／unknown（未確認）。null は有効なファクトが未登録の状態）も付いている。レストランの分類の根拠はこのファクトだけであり、エントリの reservationType／mobileOrder の値（旧来の辞書の列）は分類には一切使わないこと。coordsUsable=true の座標は無期限で有効なので再照会禁止。staticFresh=true のエリア・公式URL・公式所要時間はそのまま使う。imageFresh=true の施設は写真が辞書にあるので imageUrl を調べ直さない。取得が必要なのは、辞書に無い施設と、期限切れ（staticFresh=false）の属性だけ。種として登録された行は静的属性が空（static_fetched_at が null）であり、初回生成では全件が取得対象である。初回生成では、採用する施設について、手順2dの一括取得と saveFacilities での保存（officialUrl・durationMin・imageUrl を含む）を、起草の前に無条件で必ず行うこと（『必要になったら』ではない）。ただし restaurantFact が null のレストランは、他の静的属性が新鮮でも、ファクトの登録（手順2d）だけは必要になる。`,
 `1. 公式サイト（${officialTop} を起点に、アトラクション一覧、レストラン一覧、エンターテイメント（ショー/パレード）のページ、対象日のパークカレンダー/休止情報ページ）を実際に開いて読む。営業時間、休止施設、ショー・パレードの開催時刻、ディズニー・プレミアアクセス/プライオリティパス/スタンバイパスの対象施設とルール、チケット制度も、記憶ではなく公式ページの記載で確認すること。【日付層は毎回必須】このうち営業時間・休止・ショー/パレード時刻は対象日で変わる「日付層」の情報で、辞書では代替できない。毎回この手順で確認すること（辞書で足りるのは静的属性だけ）。ただし確認のための取得は手順1aの取得計画（立案）に従うこと：再利用と判定された行は取り直さず、そのスナップショットで確認したものとする。`,
 `1a. 【検証用データの取得（必須・この回の取得データで検証する）】完成したプランは、保存の直前に「この回に取得した公式データ」と突き合わせて検証される（手順2e）。その材料として、この回に必ず次を取得しておくこと。(i) 【正規化ソース層（必須・この順序を厳守）】${CANONICAL_FETCH_STEPS}${acquisitionPlanSteps(c.park, c.visitDate)}正典ソース集合のうち、取得計画で fetch と判定されたノードを取得し、読む前に saveSourceSnapshots アクションで生テキストのまま保存すること（batchId はこの回の取得を識別する任意の文字列。種別は dpa_page＝DPA案内ページ／facility_list＝施設全一覧（アトラクション＋エンターテイメント）／operations＝対象日の営業時間・休止情報／show_schedule＝公演スケジュール／ticket_prices＝チケット価格／announcements＝告知・ニュース一覧／monthly_calendar＝月間カレンダー／restaurant_list＝レストラン一覧。対象日を持つものは targetDate に対象日を入れる）。次に、保存したスナップショットと再利用行の指定スナップショットを読んで正規化ファクトを構築し、saveNormalizedFacts アクションで登録すること。手順は：(a) facility_list スナップショットから母集合（そのパークの全施設名）を読み取る（施設辞書の蓄積分を母集合にしてはいけない）。(b) 母集合の全施設について、DPA状態（対象 eligible／対象外 not_eligible／不明 unknown）、単価（対象時のみ）、適用期間（開始日／終了日。行に付いた「対象期間：2026年11月30日（月）～」のような表記も期間として読み取る）を、根拠スナップショットからの逐語抜粋とともにファクトにする。抜粋は保存したスナップショットの生テキストから一字も変えずに切り取ること（サーバーが逐語一致を機械照合し、単価・期間の日付は抜粋の中に表記が含まれていなければ登録を拒否する）。対象外の根拠は、DPAページに載っていないこと自体は抜粋で示せないので、evidenceKind="universe_listing" として施設全一覧側の「その施設名を含む抜粋」でよい。(c) 判定できない施設は黙って省かず、unknown＋理由で必ず埋める。登録結果に missing（ファクトの無い母集合施設）が返ったら、その施設を unknown＋理由で埋めて再登録し、missing が空＝完全なビルドになるまで繰り返すこと。保存時のDPA照合は、この完全なビルドのファクトだけを根拠に行われる（スナップショット本文からの場当たり的な抽出は一切使われない）。DPAの公式ページ自体が取得できない場合はファクトが作れないので、DPA前提の行は作らないこと（スタンバイで組む）。検証できないDPAを前提にしたプランは保存できない。(ii) 対象日の休止施設の一覧（パークカレンダー/休止情報ページで確認したもの）を控える（operations スナップショットとしても保存すること）。(iii) プランに使うショー/パレードの公式公演時刻（対象日の開催時刻）を控える。これらは記憶で代替してはいけない。取得できなかったものがある場合は、その項目は「未確認」として扱う（手順2e・手順4参照）。`,
 `1b. 【待ち時間の推定材料】待ち時間の公式データは存在しないため、次の「待ち時間参考サイト」（第三者が公式の表示待ち時間を記録・集計した民間の実績データ）を実際に開いて読み、候補施設の典型的な待ち水準（平均・最大・平日/休日の目安など）を推定の材料にすること。これは公式情報ではない「推定の材料」であり、公式の確認事項と混同してはいけない。【取得はサイトごとに段階制】各サイトには前回の取得方法が記録されている（下記リスト参照）。記録が「ブラウザ表示で取得できた」サイトは最初からブラウザ表示で開くこと。記録が「静的取得で取得できた」または未記録のサイトは、まずスクリプトによる静的取得（一括取得スクリプトに相乗りさせてよい）で試み、集計データが読めなければブラウザ表示に切り替える。どちらの方法でも取れなかったサイトは、そのサイトなしで推定し、notes に「◯◯は取得できなかったため材料に使えなかった」と明記すること（1サイトの失敗で生成全体を止めない）。実際にどの方法で取れたか（または取れなかったか）は、手順4の waitSourceFetchResults で全サイト分を報告すること（次回の取得方法の記録になる）。待ち時間の読みに使うときは、人気の序列だけでなく、定員・回転の速さ・DPA対象かどうかといった供給側の条件も踏まえ、甘い読み（例: 人気エリアの小型ライドを「待ちが短い」と即断する）にならないよう注意すること。参考サイトが開けない、またはその施設のデータが無い場合は、その旨を前提として読みの幅を広げること。候補にするアトラクションについては、必ず具体的な推定待ち時間（分）を1つ決めること（手順4の estWaitMin）。材料が取れた施設はその集計（平均や曜日・時間帯の傾向）から、取れなかった施設は人気・定員・回転の条件から幅を持って見積もる。待ち時間がほぼ無いと判断できる場合も、推定は「0分」として必ず出すこと（省略は禁止）。`,
@@ -5494,7 +5495,7 @@ SCOPE_BOUNDARY_STEP,
 ]),
 `2b. 【スケジュールの時刻計算（最重要・厳守）】各項目の開始時刻は、その項目の「推定待ち時間＋体験時間（公式の所要時間）＋次の場所への移動時間（travel_min。上記の【移動時間の計算】の式でサーバーが決める値で、余裕はその中に含まれる）」が、次の項目の開始時刻までに収まるように決めること。travel_min は上記の式で自分でも概算できるので、その概算を下回る間隔は絶対に組まないこと。常に少し余裕を持たせる（詰め込みすぎない）。特にアトラクションは、開始時刻に列へ並び始めてから、待ち→体験→移動を経て次へ着く、という実時間で計算する。禁止例: 11:20開始のアトラクション（推定待ち40分）の次を12:00にする——待ち40分だけで12:00になり、体験時間も移動時間も存在しない。このような「推定待ち時間と矛盾するスケジュール」は絶対に作らない。保存する前に、全プランの隣り合う全ペアについて「次の開始時刻 − この開始時刻 ≧ 推定待ち時間＋体験時間＋travel_min（上記の式で概算したもの）」を検算し、満たさないペアがあれば時刻を直してから保存すること。ディズニー・プレミアアクセス等のパスを使う項目は、パス利用時の待ち（短い方）で見積もってよいが、その場合は passType にパス名を必ず入れること。`,
 `2c. 【プラン別の進捗報告（必須）】プランは必ずA→B→Cの順に1つずつ作ること。各プランの作成を実際に始める前に、進捗報告アクション（updatePlanProgress、planSetId=${planSetId}、slot=そのプランのスロット、status="generating"）を呼ぶこと。これにより画面に「プランA：作成中／プランB：待機／プランC：待機」のように、実態どおりのプラン別進捗が表示される。3プランそろってから最後に savePlanSet でまとめて保存する（保存されたプランは自動的に「完了」になる）。自分から「完了」を報告してはいけない——完了は実際に保存されたプランにだけ付く。`,
-`2d. 【不足分の一括取得（必須・このタスク専用スクリプト）】辞書で足りない静的属性（辞書に無い候補施設の座標・公式URL・エリア・公式所要時間・写真URL、期限切れ属性の取り直し）が必要になったら、その回専用の一括取得スクリプトを作成し、1回の実行でまとめて取得すること（何が要るかは依頼ごとに違うので、スクリプトは使い捨てでよい）。スクリプトには、公式一覧/詳細ページの静的フェッチと、不足座標の Nominatim 照会をまとめて含めること。Nominatim への照会は礼儀として1件ごとに1秒以上の間隔を空けること。ページを1枚ずつ自分のターンで開いていく方式は、まとめて取れるものについては禁止する（日付層の確認や、静的取得で取れなかったページのブラウザ表示による補完は除く）。取得できたら saveFacilities アクション（park="${c.park}"）で辞書に保存し、以降の計画作成は保存済みデータから行うこと。静的フェッチで取れなかった公式ページだけ、ブラウザ表示で開いて補ってよい。【レストランのファクト登録（必須）】プランに使うレストランについては、その施設自身の公式レストラン詳細ページから、根拠つきのファクトをレストラン事実レイヤーに登録すること（分類を施設辞書の列に書く方式は廃止した。行の表示はファクトから導出され、プランの行データに分類は入れない）。手順は DPA と同じ規律で：(i) まず保管庫の束（getStorehouseRestaurants）にその店があれば、その本文を saveSourceSnapshots（kind="restaurant_detail"、park="${c.park}"、fetchMethod="storehouse"、sourceFetchedAt＝束のその項目の fetchedAt、completeness は下記と同じ）で保存し、それを根拠にすること。束に無い店だけ、詳細ページを実ブラウザで開き、読む前に saveSourceSnapshots（kind="restaurant_detail"、park="${c.park}"、fetchMethod は実際の取得方法、completeness は {expectationSource: "none", expectation: "レストラン詳細ページには件数宣言が無いため完全性の期待値は導けない", result: "not_derivable"}）で全文を保存する。(ii) 保存した本文を読んで、saveRestaurantFacts（park="${c.park}"）で {name（公式の施設名）, serviceType（ページのサービスタイプの表記そのまま。無ければ null）, snapshotId, reservation, mobileOrder} を登録する。reservation は {type: "required"（予約必須）／"ps"（プライオリティ・シーティング対象）／"none"（予約の経路なし）／"unknown"（未確認）, evidenceKind, evidence（保存した本文からの逐語抜粋）, unknownReason（unknown のとき必須）}、mobileOrder は {type: "available"（モバイルオーダー対象）／"not_available"（対象外）／"unknown", 同じ形}。肯定分類（required／ps／available）は、分類を裏づける表記を含む抜粋（evidenceKind="excerpt"）でなければ登録できない。否定分類（none／not_available）は原則として不在の根拠（evidenceKind="absence"、evidence は施設名を含む一節）で登録する——詳細ページ全文に予約・モバイルオーダーの存在マーカーが無いことを、サーバーが機械確認する（モバイルオーダーの対象外がページに明記されている場合だけ、その表記を含む抜粋でもよい）。公式の記述から読み取れない項目は "none"／"not_available" に倒さず、必ず "unknown"＋理由で登録すること。分類をラベルや印象から推測で作ってはいけない（例：「ショーレストランだから予約必須」「カウンター式だからモバイルオーダー対象だろう」は禁止——ショーダイニングエリアだけが予約必須で、本体のレストランは予約なし・モバイルオーダー対象、という二重構造の店が実在する）。公式一覧で別エントリとして載っている施設（本体とショーダイニングエリア等）は混ぜずに別々のファクトとし、それぞれ自身の詳細ページを根拠に登録すること。getFacilityDictionary の restaurantFact に有効なファクト（登録から180日以内）がある施設は再利用し、詳細ページの再取得・再登録はしないこと。`,
+`2d. 【不足分の一括取得（必須・このタスク専用スクリプト）】初回生成（辞書の行が種の状態＝static_fetched_at が null のとき）は、採用する全施設の公式詳細ページを一括取得スクリプトで取得し、saveFacilities で保存すること（必須・起草の前に行う）。それ以外の場合も、辞書で足りない静的属性（辞書に無い候補施設の座標・公式URL・エリア・公式所要時間・写真URL、期限切れ属性の取り直し）が必要になったら、同様に一括取得すること。その回専用の一括取得スクリプトを作成し、1回の実行でまとめて取得すること（何が要るかは依頼ごとに違うので、スクリプトは使い捨てでよい）。スクリプトには、公式一覧/詳細ページの静的フェッチと、不足座標の Nominatim 照会をまとめて含めること。Nominatim への照会は礼儀として1件ごとに1秒以上の間隔を空けること。ページを1枚ずつ自分のターンで開いていく方式は、まとめて取れるものについては禁止する（日付層の確認や、静的取得で取れなかったページのブラウザ表示による補完は除く）。取得できたら saveFacilities アクション（park="${c.park}"）で辞書に保存し、以降の計画作成は保存済みデータから行うこと。静的フェッチで取れなかった公式ページだけ、ブラウザ表示で開いて補ってよい。【レストランのファクト登録（必須）】プランに使うレストランについては、その施設自身の公式レストラン詳細ページから、根拠つきのファクトをレストラン事実レイヤーに登録すること（分類を施設辞書の列に書く方式は廃止した。行の表示はファクトから導出され、プランの行データに分類は入れない）。手順は DPA と同じ規律で：(i) まず保管庫の束（getStorehouseRestaurants）にその店があれば、その本文を saveSourceSnapshots（kind="restaurant_detail"、park="${c.park}"、fetchMethod="storehouse"、sourceFetchedAt＝束のその項目の fetchedAt、completeness は下記と同じ）で保存し、それを根拠にすること。束に無い店だけ、詳細ページを実ブラウザで開き、読む前に saveSourceSnapshots（kind="restaurant_detail"、park="${c.park}"、fetchMethod は実際の取得方法、completeness は {expectationSource: "none", expectation: "レストラン詳細ページには件数宣言が無いため完全性の期待値は導けない", result: "not_derivable"}）で全文を保存する。(ii) 保存した本文を読んで、saveRestaurantFacts（park="${c.park}"）で {name（公式の施設名）, serviceType（ページのサービスタイプの表記そのまま。無ければ null）, snapshotId, reservation, mobileOrder} を登録する。reservation は {type: "required"（予約必須）／"ps"（プライオリティ・シーティング対象）／"none"（予約の経路なし）／"unknown"（未確認）, evidenceKind, evidence（保存した本文からの逐語抜粋）, unknownReason（unknown のとき必須）}、mobileOrder は {type: "available"（モバイルオーダー対象）／"not_available"（対象外）／"unknown", 同じ形}。肯定分類（required／ps／available）は、分類を裏づける表記を含む抜粋（evidenceKind="excerpt"）でなければ登録できない。否定分類（none／not_available）は原則として不在の根拠（evidenceKind="absence"、evidence は施設名を含む一節）で登録する——詳細ページ全文に予約・モバイルオーダーの存在マーカーが無いことを、サーバーが機械確認する（モバイルオーダーの対象外がページに明記されている場合だけ、その表記を含む抜粋でもよい）。公式の記述から読み取れない項目は "none"／"not_available" に倒さず、必ず "unknown"＋理由で登録すること。分類をラベルや印象から推測で作ってはいけない（例：「ショーレストランだから予約必須」「カウンター式だからモバイルオーダー対象だろう」は禁止——ショーダイニングエリアだけが予約必須で、本体のレストランは予約なし・モバイルオーダー対象、という二重構造の店が実在する）。公式一覧で別エントリとして載っている施設（本体とショーダイニングエリア等）は混ぜずに別々のファクトとし、それぞれ自身の詳細ページを根拠に登録すること。getFacilityDictionary の restaurantFact に有効なファクト（登録から180日以内）がある施設は再利用し、詳細ページの再取得・再登録はしないこと。`,
 `2e. 【検証プロセス（保存直前・必須）】3プランが完成したら、savePlanSet を呼ぶ前に、手順1aでこの回に取得した公式データと完成した行を突き合わせて、次の全てを自分で照合すること。savePlanSet 側でも同じ照合が機械的に行われ、通らないプランは保存を拒否される（拒否されたら指摘を直してもう一度呼ぶこと。失敗報告はしない）。(1) DPA対象可否：passType がディズニー・プレミアアクセスの全行が、手順1aで登録した正規化ファクト（完全なビルド）で「対象（eligible）」と記録された施設でなければならない。サーバーはそのファクトだけを根拠に照合するので、対象外（not_eligible）や不明（unknown）の施設へのDPA設定は絶対に置かない。加えて、ファクトに適用期間（開始日／終了日）が記録された施設については、サーバーは来園日時点で有効な対象かどうかも照合する。適用開始日が来園日より後の施設（将来の対象拡大で追加される施設など）や、適用終了日を過ぎた施設には、その来園日にはDPA前提を付けないこと（スタンバイで組む）。どうしても入れたい施設が対象外なら、DPA前提をやめてスタンバイの推定待ち時間で組み直すか、理由を notes に書いて外す。(2) DPA単価（購入した時に計上）：DPA費用は「購入した時」にだけ計上する。DPAを買う購入ごとに購入イベント行（kind: "purchase"）を1行入れ、その行にファクト単価（1名分）を unitPriceJpy として持たせ、さらに purchaseCount として「そのプランでその施設を実際に利用する人数」を必ず持たせること（アトラクションは実際に乗る人数、ショーのDPA鑑賞エリアは実際にそのエリアで鑑賞する人数。全員が利用する場合のみ参加者総数。参加者全員が買う前提で総数を入れてはいけない）。費用内訳のDPA金額は、購入イベント行ごとにファクト単価×対象人数（purchaseCount）を1回ずつ合計した額でなければならない——サーバーも購入インスタンス（施設×購入イベント）単位でファクト単価×対象人数から再計算するので、使用行（アトラクション／ショー行）でも計上して二重に数えたり、自分の書き起こしや記憶の単価（古い料金）で計算すると拒否される（クラス2：DPA費用の計上不一致）。対象人数が無い購入イベント行、対象人数が1未満または参加者総数（大人＋子ども）を超える購入イベント行もクラス2で拒否される。使用行には unitPriceJpy を入れないこと（入れてもサーバーは無視するが、形として入れない）。購入イベント行の単価がファクト単価と異なる場合もクラス2で拒否される。合計（estimatedCostJpy）も内訳の合計と一致させる。(3) 休止・営業時間・公演時刻：各行の施設が対象日の休止一覧に無いこと、各行の時刻が営業時間内であること（開始時刻だけでなく、公式所要時間が分かる行は終了時刻＝開始時刻＋所要時間も、退園時刻と閉園時刻の早い方を超えないこと。超える行はクラス4（営業時間外・終了側）で拒否される。所要時間が分からない行は終了側では判定されない。上限ちょうどに終わる行は範囲内）、ショー/パレードの開始時刻が対象日の公式公演時刻と一致すること。(4) DPA購入順序：公式ルール「次のDPAは、前のDPAの購入から60分後、または前のパスの利用開始時刻の早い方から購入できる」で購入列が成立すること。各DPA行には購入時刻を dpaPurchaseTime として必ず入れる（プラン内に購入時刻が明示される）。(5) 照合できなかった項目（ページ取得失敗など）は、黙って通さず verification.unverified に「◯◯：未確認（理由）」の形で入れること。未確認の項目は notes にも「未確認」と明示される。`,
 `2f. 【未確定要素の扱い（必須）】その回の材料では公式に確認できなかった値を仮定として置く要素（未確定要素）は、理由を添えればプランに入れてよい（未確定であることだけを理由に一律に除外しなくてよい）。対象はショー時刻に限らず、未確定の要素全般である（例：公式スケジュールが未発表の期間のショー公演時刻、対象日の公演時刻が「未定」のショー行、取得できなかった施設の属性値）。ただし、未確定の要素を、印も理由もなく確定したもののように置くことは絶対に禁止する。入れる場合は、その項目に unconfirmedReason（短い理由。例「公式スケジュール未発表」「公演時刻未定」）と unconfirmedNote（なぜ未確定かの説明。分かる場合は公式の掲載予定時期も含める。例「公式のスケジュールがまだ出ていません。翌月分は前月8日ごろに掲載されます」）を必ず入れること（手順4）。画面ではその行に「未確定（理由）」の印が付き、PDFにも載る。検証の記録の未確認リストへの記載は、行に入れた理由・説明からアプリ側が自動で整合させて載せる（行側が正本）ので、verification.unverified に同じ未確定を重ねて書かないこと。【検証ゲートとの関係】公式公演時刻が存在しない（未発表・未定）場合に、未確定として明示したショー行は、公演時刻不一致（クラス5）では拒否されない。逆に、公式公演時刻が存在するのに別の時刻を置いた行は、未確定の印を付けてもクラス5で拒否される——未確定は不一致の言い訳にならない。公演時刻が存在するショーは、必ずその公式時刻に合わせること。`,
 `3. 座標の解決は次の優先順位で行う。(a) 作り直しの引き継ぎ値、(b) 施設辞書（coordsUsable=true のもの）、(c) 手順2dの一括取得スクリプト内での Nominatim 照会。座標検索に使ってよいのは OpenStreetMap の Nominatim（nominatim.openstreetmap.org）だけとする。Overpass API をはじめ、他のジオコーダ・座標取得サービスへ無断で切り替えてはいけない。日本語名で見つからなければ、第10節の固定順序で再試行すること（そのままの形→検索範囲を対象パーク周辺に制限した再照会→機械的な表記ゆれ（記号の正規化・副題を落とした短縮形・英語名））。パーク名やエリア名を施設名に付け足した形は、どの段階でも照会に使ってはならない（再試行もスクリプト内でまとめて行う）。確信を持って引けた場合だけ座標を入れ、Nominatim で引けない項目は座標なし（null）にする。座標を推測で作らないこと。座標が引けなかった施設は、notes にその旨を明記すること（どの施設が座標なしになったか分かるように）。なお座標の最終結果は、保存時にサーバー側でも表記ゆれのバリエーションで Nominatim の再照会が行われて確定し、施設自体がどうしても引けない場合はエリアの代表地点の座標でピンが表示され、その旨が検証の記録に残る。例外として、エリアがパークワイドのショー（花火など）は、施設名で引けた地点がパーク外の橋の上など無関係な場所であることがあるため使われず、座標はサーバーがパークの代表地点（シーはメディテレーニアンハーバー、ランドはワールドバザール）に置き換える（ペイロードや辞書に何が入っていても置き換わる）。notes には照会を試みた事実だけを書き、「座標なしで確定」とは書かないこと。`,
@@ -7397,7 +7398,9 @@ SCOPE_BOUNDARY_STEP,
 `2e. 【無理ゲートと融合の原則（必須）】手順1〜1bで材料（公式施設一覧・対象日の運営／休止情報・公演時刻・正規化ファクト）が揃った時点で、起草に入る前に、変更条件と条件の要求が次の固定された無理パターンに当たらないかだけを判定すること：(1) 存在しない（必須の施設・ショーが対象パークの施設一覧に無い、または対象日に休止・公演なしであることが日付層で確定している。確認できないものは断定しない）、(2) 時間の明らかな無理（必須項目を最も緩い前提＝一番空いた側の混雑前提・待ちの下限側・トレードオフを利用者に有利な側へ全部倒して粗く合計しても、入園〜退園・営業時間の枠に収まらない）、(3) 予算の明らかな無理（最小の支出＝チケット代＋必須と明示された有料項目の費用の下限でも予算を超える）、(4) 矛盾した要求（同時刻に2か所、等）。判定は常に楽観側に倒し、トレードオフで救済できるもの（DPAを減らせば収まる、順序を変えれば両立する等）は絶対に弾かず、境界に近ければ通常の生成に進める。パターンはこの固定リストに限る。いずれかに当たれば、起草に入らず、仮の内容も保存せず、reportImpossibleRequest アクション（planSetId と slot、findings: [{category, reason: 「分類の言葉＋具体名＋客観的事実の指摘」までの1〜2文。明確な矛盾は客観的事実そのものを述べてよい（例：同じ時刻に2か所にはいられない）。具体的な改善案・処方箋は、約束の形（「○○を外せば作れます」等の反実仮想）でも提案の形（「どちらか一方を〜するなど」「〜に変更すれば」等）でも書かない}]）を呼んで終了すること（savePlanReplacement も reportPlanReplacementFailure も呼ばない）。起草で要求が全ては両立しない場合は、固定の落とす順序を使わず、要求の強さを言われ方（「絶対」「必ず」の明示・繰り返し・順序指定・詳細さが強い／一度だけの軽い言及は弱い）から読んで、その利用者の価値観に沿う形に融合すること。取り込めなかった要求は、黙って落とさず、理由つきで summary に列挙すること。どう調整しても両立しないことが明確になった場合も、仮の内容を保存せず reportImpossibleRequest で報告すること。`,
 `2e. 【未確定要素の扱い（必須）】その回の材料では公式に確認できなかった値を仮定として置く要素（未確定要素）は、理由を添えればプランに入れてよい。対象はショー時刻に限らず未確定の要素全般であり、代替DPAの利用時間帯を仮定として置く場合もこれに当たる。ただし、未確定の要素を、印も理由もなく確定したもののように置くことは絶対に禁止する。入れる場合は、その項目に unconfirmedReason（短い理由）と unconfirmedNote（なぜ未確定かの説明。分かる場合は公式の掲載予定時期も含める）を必ず入れること。検証の記録の未確認リストへは、行に入れた理由・説明からアプリ側が自動で整合させて載せる（行側が正本）ので、verification.unverified に同じ未確定を重ねて書かないこと。公式公演時刻が存在しない（未発表・未定）場合に未確定として明示したショー行は公演時刻不一致（クラス5）で拒否されないが、公式公演時刻が存在するのに別の時刻を置いた行は、未確定の印を付けてもクラス5で拒否される。`,
 ...(dayOfReport
-? []
+? [
+`2f. 【「最初の10分」行の引き継ぎ（当日リスケ）】元のプラン${slot}の「最初の10分」行（kind="first10"）がある場合は、その行を固定案内文（FIRST10_GUIDANCE）を含めて内容・位置（入園行の直後）のまま一字も変えずに引き継ぐこと。作り直したり、抽選・DPA購入の項目や案内文を書き換えたりしないこと。元のプランに「最初の10分」行が無い場合は、この行を入れないこと。`,
+]
 : [
 `2f. 【「最初の10分」行（表示専用）】差し替えるプラン${slot}にも、全体生成と同じ「最初の10分」行を、作り直した内容に合わせて入れること。位置は入園行の直後（購入イベント行より前）。形：kind は "first10"、name は「入園後の最初の10分」、timeLabel は入園時刻とし、area／passType／dpaPurchaseTime／unitPriceJpy／estWaitMin／lat／lng／imageUrl／referenceUrl／officialUrl／unconfirmedReason／unconfirmedNote は全て null。note には、1行に1つずつ「・」で始めて、まず抽選の項目（そのプランに含まれるショーのうち、この回に取得した公式ショースケジュールの原文に「エントリー受付対象」の表記があるものについて「・{ショーの公式名}の抽選をする」。対象かどうかは原文の表記だけで判断し、推測で対象を作らない）、次にDPA購入の項目（人気順＝推定待ち時間の降順で入園直後に置かれた最初の購入イベント1件だけについて「・{施設の公式名}のDPAを買う」。60分ルールで後ろに直列化された2件目以降は入れない）を列挙し、最後に案内文「${FIRST10_GUIDANCE}」を一字も変えずに1行で入れること。入園直後のDPA購入も抽選対象ショーも無い場合は、この行は入れない。この行は表示専用で、時刻計算・移動時間・費用には一切関与しない（前後で間隔を空けない）。`,
 ]),
@@ -8410,6 +8413,7 @@ original: z.infer<typeof verificationShape> | null,
 ): Promise<{
 problems: string[];
 unverified: string[];
+factUnverified: string[];
 dpaExtracted: DpaExtractedEntry[];
 partySize: number;
 gate: DpaFactGate;
@@ -8421,6 +8425,15 @@ if (!problems.includes(s)) problems.push(s);
 };
 const pushUnverified = (s: string): void => {
 if (!unverified.includes(s)) unverified.push(s);
+};
+// Fact-origin unverified entries only (see factsUnconfirmed),
+// classified by origin exactly as in the save paths. The task's
+// own reported entries (fresh.unverified) are not classified by
+// their wording and never join this list; neither do travel-leg
+// or coordinate entries.
+const factUnverified: string[] = [];
+const pushFactUnverified = (s: string): void => {
+if (!factUnverified.includes(s)) factUnverified.push(s);
 };
 for (const u of fresh.unverified) pushUnverified(u);
 
@@ -8464,9 +8477,10 @@ close: Number(hm[3]) * 60 + Number(hm[4]),
 }
 }
 if (!hoursWindow) {
-pushUnverified(
-"営業時間：未確認（今回の取得データから対象日の営業時間を読み取れなかったため）",
-);
+const hoursUnverifiedEntry =
+"営業時間：未確認（今回の取得データから対象日の営業時間を読み取れなかったため）";
+pushUnverified(hoursUnverifiedEntry);
+pushFactUnverified(hoursUnverifiedEntry);
 }
 // Class 4, END side (spec §9.2, revision X) — the same judgement
 // the save paths make: a row must END by the earlier of the
@@ -8483,7 +8497,10 @@ endCapMin = hoursWindow.close;
 } else if (snapshotExitMin != null) {
 endCapMin = snapshotExitMin;
 }
-for (const u of factGateLevelUnverified(gate)) pushUnverified(u);
+for (const u of factGateLevelUnverified(gate)) {
+pushUnverified(u);
+pushFactUnverified(u);
+}
 // Park hours themselves changed since creation: report the change
 // even when every row still falls inside the new window.
 if (
@@ -8645,11 +8662,15 @@ pushProblem(
 // (the same derived entry the creation record holds), not as
 // a problem and not in generic wording.
 const entry = rowUnconfirmedRecordEntry(item);
-if (entry) pushUnverified(entry);
+if (entry) {
+pushUnverified(entry);
+pushFactUnverified(entry);
+}
 } else {
-pushUnverified(
-`${item.name}の公演時刻：未確認（今回取得した公式の公演時刻データと照合できなかったため）`,
-);
+const showTimeUnverifiedEntry =
+`${item.name}の公演時刻：未確認（今回取得した公式の公演時刻データと照合できなかったため）`;
+pushUnverified(showTimeUnverifiedEntry);
+pushFactUnverified(showTimeUnverifiedEntry);
 }
 }
 if (isDpaPass(item.passType)) {
@@ -8708,17 +8729,19 @@ for (const inst of instances) {
 const key = facilityNameKey(inst.name);
 const fact = gate.factsByKey.get(key);
 if (!fact) {
-pushUnverified(
-`${inst.name}のDPA：未確認（正規化ファクトのビルドの母集合にこの施設が含まれていないため）`,
-);
+const dpaUnverifiedEntry =
+`${inst.name}のDPA：未確認（正規化ファクトのビルドの母集合にこの施設が含まれていないため）`;
+pushUnverified(dpaUnverifiedEntry);
+pushFactUnverified(dpaUnverifiedEntry);
 } else if (fact.status === "not_eligible") {
 pushProblem(
 `プラン${plan.slot}「${inst.name}」：ディズニー・プレミアアクセスの対象から外れています（正規化ファクト（ビルド #${gate.build?.id}）で対象外と記録されています）`,
 );
 } else if (fact.status === "unknown") {
-pushUnverified(
-`${inst.name}のDPA：未確認（正規化ファクトで状態が不明のため：${fact.unknownReason ?? "理由なし"}）`,
-);
+const dpaUnverifiedEntry =
+`${inst.name}のDPA：未確認（正規化ファクトで状態が不明のため：${fact.unknownReason ?? "理由なし"}）`;
+pushUnverified(dpaUnverifiedEntry);
+pushFactUnverified(dpaUnverifiedEntry);
 } else {
 const periodReason = isIsoDate(set.visitDate)
 ? dpaPeriodExclusionReason(fact, set.visitDate)
@@ -8810,6 +8833,7 @@ pushProblem(
 return {
 problems,
 unverified,
+factUnverified,
 dpaExtracted: [...dpaExtracted.values()],
 partySize,
 gate,
@@ -9388,8 +9412,14 @@ async function buildVerificationPackageText(
     } else if (it.kind === "attraction" || it.kind === "show") {
       parts.push(`推定待ち時間：取得できなかった（保存されていません）`);
     }
-    const dur = it.durationMin ?? noteDurationMin(it.note);
-    if (dur != null) parts.push(`所要時間：${dur}分（公式所要時間）`);
+    if (it.durationMin != null) {
+      parts.push(`所要時間：${it.durationMin}分（公式所要時間）`);
+    } else {
+      const noteDur = noteDurationMin(it.note);
+      if (noteDur != null) {
+        parts.push(`所要時間：${noteDur}分（プランの備考より）`);
+      }
+    }
     if (it.passType) parts.push(`パスの種別：${it.passType}`);
     if (it.kind === "purchase") {
       parts.push(
@@ -12570,7 +12600,7 @@ openTab?.kind === "planSet" && openTab.planSetId != null
 .from(schema.planSets)
 .where(eq(schema.planSets.id, openTab.planSetId)))[0] ?? null)
 : null;
-const latestDoneSet = latestSets.find((s) => s.status === "done") ?? null;
+const latestDoneSet = (await db.select().from(schema.planSets).where(eq(schema.planSets.status, "done")).orderBy(desc(schema.planSets.id)).limit(1))[0] ?? null;
 const referenceSet: PlanSetRow | null = openSet ?? latestDoneSet;
 const referenceBasis = openSet
 ? "ユーザーがこのメッセージを送ったときに開いていたタブのプラン"
@@ -16665,12 +16695,24 @@ const autoUnverified: string[] = [];
 const pushUnverified = (s: string): void => {
 if (!autoUnverified.includes(s)) autoUnverified.push(s);
 };
+// Fact-origin unverified entries only (see factsUnconfirmed):
+// collected alongside autoUnverified at the fact-derived push
+// sites below. Travel-leg and coordinate entries are a different
+// classification and never join this list.
+const factUnverified: string[] = [];
+const pushFactUnverified = (s: string): void => {
+if (!factUnverified.includes(s)) factUnverified.push(s);
+};
 if (!hoursWindow) {
-pushUnverified(
-"営業時間：未確認（対象日の営業時間を、この回の取得データから読み取れなかったため）",
-);
+const hoursUnverifiedEntry =
+"営業時間：未確認（対象日の営業時間を、この回の取得データから読み取れなかったため）";
+pushUnverified(hoursUnverifiedEntry);
+pushFactUnverified(hoursUnverifiedEntry);
 }
-for (const u of factGateLevelUnverified(factGate)) pushUnverified(u);
+for (const u of factGateLevelUnverified(factGate)) {
+pushUnverified(u);
+pushFactUnverified(u);
+}
 for (const legLabel of travelUnverifiedLegs.slice(0, 5)) {
 pushUnverified(
 `移動時間（${legLabel}）：未確認（どちらかの施設の座標が、プランの項目からも施設辞書からも引けなかったため。その区間は従来の下限＝推定待ち＋10分で検証しました）`,
@@ -16760,9 +16802,10 @@ violations.push(
 );
 }
 } else if (!item.unconfirmedReason) {
-pushUnverified(
-`${item.name}の公演時刻：未確認（この回に取得した公式の公演時刻データと照合できなかったため）`,
-);
+const showTimeUnverifiedEntry =
+`${item.name}の公演時刻：未確認（この回に取得した公式の公演時刻データと照合できなかったため）`;
+pushUnverified(showTimeUnverifiedEntry);
+pushFactUnverified(showTimeUnverifiedEntry);
 }
 }
 // §9.4: when official performance times DO exist, the branch
@@ -16825,7 +16868,10 @@ set.visitDate,
 );
 if (!verdict.ok) {
 violations.push(verdict.violation);
-if (verdict.unverified) pushUnverified(verdict.unverified);
+if (verdict.unverified) {
+pushUnverified(verdict.unverified);
+pushFactUnverified(verdict.unverified);
+}
 continue;
 }
 const instCount = dpaInstanceCount(
@@ -16988,6 +17034,7 @@ for (const item of plan.items) {
 const entry = rowUnconfirmedRecordEntry(item);
 if (entry && !rowDerivedUnverified.includes(entry)) {
 rowDerivedUnverified.push(entry);
+pushFactUnverified(entry);
 }
 if (
 item.unconfirmedReason &&
@@ -17497,7 +17544,7 @@ role: "assistant",
 // holds the 作り直し版 and the original plan is still there —
 // the same wording as the acceptance reply, so what was promised
 // and what happened stay identical end to end.
-text: hasSpecSuspectUnverified(unverifiedAll)
+text: factsUnconfirmed(factGate, factUnverified)
 ? `${completionText}\nなお、この回では現在の仕様に関わる項目に確認できなかったものがあります。${SPEC_REPAIR_GUIDANCE}`
 : completionText,
 });
@@ -18122,12 +18169,24 @@ const autoUnverified: string[] = [];
 const pushUnverified = (s: string): void => {
 if (!autoUnverified.includes(s)) autoUnverified.push(s);
 };
+// Fact-origin unverified entries only (see factsUnconfirmed):
+// collected alongside autoUnverified at the fact-derived push
+// sites below. Travel-leg and coordinate entries are a different
+// classification and never join this list.
+const factUnverified: string[] = [];
+const pushFactUnverified = (s: string): void => {
+if (!factUnverified.includes(s)) factUnverified.push(s);
+};
 if (!hoursWindow) {
-pushUnverified(
-"営業時間：未確認（対象日の営業時間を、この回の取得データから読み取れなかったため）",
-);
+const hoursUnverifiedEntry =
+"営業時間：未確認（対象日の営業時間を、この回の取得データから読み取れなかったため）";
+pushUnverified(hoursUnverifiedEntry);
+pushFactUnverified(hoursUnverifiedEntry);
 }
-for (const u of factGateLevelUnverified(factGate)) pushUnverified(u);
+for (const u of factGateLevelUnverified(factGate)) {
+pushUnverified(u);
+pushFactUnverified(u);
+}
 for (const legLabel of travelUnverifiedLegs.slice(0, 5)) {
 pushUnverified(
 `移動時間（${legLabel}）：未確認（どちらかの施設の座標が、プランの項目からも施設辞書からも引けなかったため。その区間は従来の下限＝推定待ち＋10分で検証しました）`,
@@ -18205,9 +18264,10 @@ violations.push(
 );
 }
 } else if (!item.unconfirmedReason) {
-pushUnverified(
-`${item.name}の公演時刻：未確認（この回に取得した公式の公演時刻データと照合できなかったため）`,
-);
+const showTimeUnverifiedEntry =
+`${item.name}の公演時刻：未確認（この回に取得した公式の公演時刻データと照合できなかったため）`;
+pushUnverified(showTimeUnverifiedEntry);
+pushFactUnverified(showTimeUnverifiedEntry);
 }
 }
 // §9.4, same rule as savePlanSet: an existing official time
@@ -18258,7 +18318,10 @@ set.visitDate,
 );
 if (!verdict.ok) {
 violations.push(verdict.violation);
-if (verdict.unverified) pushUnverified(verdict.unverified);
+if (verdict.unverified) {
+pushUnverified(verdict.unverified);
+pushFactUnverified(verdict.unverified);
+}
 continue;
 }
 const instCount = dpaInstanceCount(
@@ -18618,6 +18681,7 @@ for (const item of args.plan.items) {
 const entry = rowUnconfirmedRecordEntry(item);
 if (entry && !rowDerivedUnverified.includes(entry)) {
 rowDerivedUnverified.push(entry);
+pushFactUnverified(entry);
 }
 if (
 item.unconfirmedReason &&
@@ -18792,7 +18856,6 @@ slot === "A"
 progressA: "done" as const,
 progressUpdatedAt: new Date(),
 verificationJson: JSON.stringify(verificationRecord),
-lastVerifiedAt: new Date(),
 factBuildId: args.factBuildId ?? set.factBuildId,
 pendingOpsJson: completedOpsJson,
 }
@@ -18801,7 +18864,6 @@ pendingOpsJson: completedOpsJson,
 progressB: "done" as const,
 progressUpdatedAt: new Date(),
 verificationJson: JSON.stringify(verificationRecord),
-lastVerifiedAt: new Date(),
 factBuildId: args.factBuildId ?? set.factBuildId,
 pendingOpsJson: completedOpsJson,
 }
@@ -18809,7 +18871,6 @@ pendingOpsJson: completedOpsJson,
 progressC: "done" as const,
 progressUpdatedAt: new Date(),
 verificationJson: JSON.stringify(verificationRecord),
-lastVerifiedAt: new Date(),
 factBuildId: args.factBuildId ?? set.factBuildId,
 pendingOpsJson: completedOpsJson,
 },
@@ -18824,7 +18885,7 @@ pendingOpsJson: completedOpsJson,
 if (wasGenerating) {
 await db.insert(schema.messages).values({
 role: "assistant",
-text: hasSpecSuspectUnverified(unverifiedAll)
+text: factsUnconfirmed(factGate, factUnverified)
 ? `プラン${slot}の差し替えが終わりました。「${set.title}」のプラン${slot}に変更が反映されています。他のプランはそのままです。\nなお、この回では現在の仕様に関わる項目に確認できなかったものがあります。${SPEC_REPAIR_GUIDANCE}`
 : `プラン${slot}の差し替えが終わりました。「${set.title}」のプラン${slot}に変更が反映されています。他のプランはそのままです。`,
 });
@@ -20879,7 +20940,7 @@ unconfirmedNote: it.unconfirmedNote,
 
 const v = args.verification;
 const original = parseVerificationJson(set.verificationJson);
-const { problems, unverified, dpaExtracted, gate } =
+const { problems, unverified, factUnverified, dpaExtracted, gate } =
 await checkStoredPlans(
 ctx,
 set,
@@ -20970,7 +21031,7 @@ lines.push(`・ほか${unverified.length - 15}件`);
 // result itself carries the repair guidance (the owner's rule —
 // not only the help tab). A clean re-verification gets no such
 // line, and coordinate-only unverified legs do not trigger it.
-if (problems.length > 0 || hasSpecSuspectUnverified(unverified)) {
+if (problems.length > 0 || factsUnconfirmed(gate, factUnverified)) {
 lines.push(`なお、${SPEC_REPAIR_GUIDANCE}`);
 }
 await db.insert(schema.messages).values({
