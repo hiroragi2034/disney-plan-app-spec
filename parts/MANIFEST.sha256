@@ -3,6 +3,7 @@
 # リポジトリに投入したコミット ba93ed41 の内容とSHA-256で再照合したステージングから生成した。
 # 更新：2026-11-18（記録BJ）。data/facility-coordinates.json を v2（全71施設＋会場4件、出所の追跡可能な座標のみ）に差し替えたため、当該エントリだけを再生成した。他の全エントリは不変で、再照合済みである。
 # リポジトリに投入したコミット ba93ed41 の内容とSHA-256で再照合したステージングから生成した。
+# 更新：2026-11-20（記録BP）。parts/server/src/task-manager.js（裏タスク管理クラスの最終形の書き出し）を追加したため、当該エントリだけを追加した。他の全エントリは不変で、再照合済みである。
 # 形式：<SHA-256>  <バイト数>  <リポジトリルートからの相対パス>
 # 照合方法：組み込んだパーツの全ファイルについて、この表のSHA-256と一致することを確認する（第28節・自己検証の第1層）。
 # このファイル自身は照合対象に含めない。対象は parts/ 配下の全ファイルと data/ 配下の全ファイル。
@@ -57,3 +58,4 @@ ceffae5aedf8d7a5f7e584918020ed50b037772a8f18f5dd5ab3894d5642787c  145  parts/dri
 b04db66662cf5896b0db58cbbea583473ab035743aef45daa9829517e8752757  953  parts/package.json
 5925973bdcc6c8bba3587e38c36243fadaf85675d72e4f2e25ab4ced1206f419  807087  parts/server/src/actions.ts
 f79a823cc26c00954f6180cf3bca4c6e96d9a49f3c410b9eb4625077a2bd0fef  49668  parts/server/src/schema.ts
+f418d983a5fb0a39fe7b188fd65328f38bcab2d75f0a2d3c6fa867ab151d737a  43411  parts/server/src/task-manager.js

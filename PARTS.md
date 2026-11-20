@@ -21,6 +21,7 @@
 | プラン集計 | `parts/client/src/plan_metrics.ts` | `client/src/plan_metrics.ts` | 10,230 |
 | クライアント配管・スタイル | `parts/client/src/{api.ts, main.tsx, theme.css, globals.d.ts}`、`parts/client/{index.html, build.mjs}` | 同名パス | 計9,624 |
 | サーバー全体（決定的ロジックを含む） | `parts/server/src/actions.ts` | `server/src/actions.ts` | 807,087 |
+| 裏タスク管理クラス | `parts/server/src/task-manager.js` | `server/src/actions.ts` の裏タスク管理部分の最終形の書き出し（2026-11-20、記録BP） | 43,411 |
 | データモデル | `parts/server/src/schema.ts` | `server/src/schema.ts` | 49,668 |
 | スキーマ移行（SQL 34本＋ジャーナル） | `parts/drizzle/` | `drizzle/` | 計35,318 |
 | 依存マニフェスト | `parts/package.json` | `package.json` | 953 |
@@ -35,6 +36,8 @@
 パークワイド代表地点への置き換え、正規化ファクト層は、すべて `actions.ts` の中にある。
 本家ではこのファイルは分割されていないので、分割せず丸ごとコピーした
 （分割は書き換えになるため）。
+
+裏タスク管理クラスについて：本番の裏タスクの開始・再試行・強制終了を担うサーバー側のクラスである（仕様書第2.1節）。`parts/server/src/actions.ts` は2026-11-18時点のコピーであり、このクラスを含まない。クラスは単独ファイル `parts/server/src/task-manager.js` が正であり、構築ではこのファイルをサーバーに組み込み、本番の処理の開始をすべてこのクラスに通すこと。ファイルの冒頭に、ホストが用意するものと組み込み口が書いてある。
 
 drizzle 0020 は、エリア間移動マトリクスの実データを登録する移行であり、
 スキーマだけでなく確定データも含んでいる。そのまま含めた。
