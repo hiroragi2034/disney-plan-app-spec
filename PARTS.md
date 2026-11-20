@@ -20,10 +20,11 @@
 | PDF生成 | `parts/client/src/pdf.ts` | `client/src/pdf.ts` | 68,375 |
 | プラン集計 | `parts/client/src/plan_metrics.ts` | `client/src/plan_metrics.ts` | 10,230 |
 | クライアント配管・スタイル | `parts/client/src/{api.ts, main.tsx, theme.css, globals.d.ts}`、`parts/client/{index.html, build.mjs}` | 同名パス | 計9,624 |
-| サーバー全体（決定的ロジックを含む） | `parts/server/src/actions.ts` | `server/src/actions.ts` | 807,087 |
+| サーバー全体（決定的ロジックを含む） | `parts/server/src/actions.ts` | `server/src/actions.ts` | 818,515 |
+| 辞書の種（リセット時の初期状態の復元） | `parts/server/src/facility_seed.ts` | `server/src/facility_seed.ts`（2026-11-20、記録BQ） | 16,267 |
 | 裏タスク管理クラス | `parts/server/src/task-manager.js` | `server/src/actions.ts` の裏タスク管理部分の最終形の書き出し（2026-11-20、記録BP） | 43,411 |
 | データモデル | `parts/server/src/schema.ts` | `server/src/schema.ts` | 49,668 |
-| スキーマ移行（SQL 34本＋ジャーナル） | `parts/drizzle/` | `drizzle/` | 計35,318 |
+| スキーマ移行（SQL 34本＋ジャーナル） | `parts/drizzle/` | `drizzle/` | 計35,151 |
 | 依存マニフェスト | `parts/package.json` | `package.json` | 953 |
 | パーツの説明 | `parts/README.md` | （今回作成） | — |
 
@@ -38,6 +39,11 @@
 （分割は書き換えになるため）。
 
 裏タスク管理クラスについて：本番の裏タスクの開始・再試行・強制終了を担うサーバー側のクラスである（仕様書第2.1節）。`parts/server/src/actions.ts` は2026-11-18時点のコピーであり、このクラスを含まない。クラスは単独ファイル `parts/server/src/task-manager.js` が正であり、構築ではこのファイルをサーバーに組み込み、本番の処理の開始をすべてこのクラスに通すこと。ファイルの冒頭に、ホストが用意するものと組み込み口が書いてある。
+
+記録BQ（2026-11-20）での更新：actions.ts に、本家と再構築コピーのテストで見つけて
+本家で直した不具合の修正を反映した（反映した内容は記録BQに列挙）。あわせて、
+リセットで辞書を初期状態に戻すための facility_seed.ts を追加し、移行0018の
+固定登録を取り除いた。actions.ts の出所は、本家の現在のソースの該当箇所である。
 
 drizzle 0020 は、エリア間移動マトリクスの実データを登録する移行であり、
 スキーマだけでなく確定データも含んでいる。そのまま含めた。
@@ -158,9 +164,11 @@ drizzle 0020 は、エリア間移動マトリクスの実データを登録す�
   利用者のデータがこれらの先へ送られることは無い。データはスペース自身のデータベースの中に留まる。
 - **移行データ（drizzle）の中に現れるドメインについて（記録BJでの訂正）。**
   上の一覧はコードの走査で作ったため、移行ファイルのデータ行にだけ現れる
-  ドメインが漏れていた。queue-times.com と ropedropplanner.com は、移行0018が
-  登録する待ち時間参考サイトであり、実際に取得の対象になる（第19節の区分の
-  範囲内）。disney.hosuu.jp と nlab.itmedia.co.jp は、移行0020のデータ行に
+  ドメインが漏れていた。queue-times.com と ropedropplanner.com は、以前は移行0018が
+  固定で登録していた待ち時間参考サイトのドメインである。記録BQ（2026-11-20）で、
+  登録は構築時調査の結果としてのみ存在するという原則（テストT64）に従い、
+  移行0018の固定登録を取り除いた。これらのドメインは、構築時調査で実際に
+  登録された場合にだけ、取得の対象になる（第19節の区分の範囲内）。disney.hosuu.jp と nlab.itmedia.co.jp は、移行0020のデータ行に
   出典表記として現れるだけで、接続先ではない。未宣言の送信経路は無い。
 
 申告と実物が食い違う箇所を見つけたら、それは検分の失敗ではなく配布側の問題である。

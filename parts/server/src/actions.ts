@@ -18,6 +18,7 @@ type Ctx,
 } from "@hatch/space-sdk";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import * as schema from "./schema";
+import { FACILITY_SEED, FACILITY_SEED_STAMP_MS } from "./facility_seed";
 
 // ---------- shared shapes ----------
 
@@ -1700,7 +1701,22 @@ out.push(
 `プラン${plan.slot}: 費用合計（estimatedCostJpy）が計算されていません（${tag}）。`,
 );
 }
-if (
+
+// Class 12 — the ticket line of the breakdown must be costed for
+// THIS set's snapshot party (spec §9.2).
+violations.push(
+...ticketLinePartyViolations(
+plan.slot,
+plan.costBreakdown,
+set.setType === "same_day" && set.sameDayAdults != null
+? { adults: set.sameDayAdults, children: set.sameDayChildren ?? 0 }
+: (snapshotParty ??
+(formParty
+? { adults: formParty.adults, children: formParty.children }
+: null)),
+args.ticketPrices,
+),
+);if (
 opts.ticketFloorJpy != null &&
 plan.estimatedCostJpy != null &&
 plan.estimatedCostJpy > 0 &&
@@ -1863,6 +1879,44 @@ async function resolveTicketFloor(
       : "") +
     `＝¥${floorJpy.toLocaleString("ja-JP")}`;
   return { floorJpy, basis, violations: [] };
+}
+
+// Class 12 — 条件対応の不一致 (spec §9.2): the party the COSTS were
+// computed for must be the party in the set's conditions snapshot.
+// The observable trace of the party in a submission is the ticket
+// line of the cost breakdown: a line labelled as tickets must equal
+// the snapshot party's ticket total at the submitted (snapshot-
+// checked) official unit prices. A different amount means the plan
+// was costed for a different party — e.g. a 3-person ticket line
+// (¥32,700) on a 2-adult set (¥21,800) — and is refused here. Plans
+// whose breakdown has no ticket-labelled line are not judged by
+// this check (the class-11 cost floor still guards the total).
+const TICKET_LINE_RE = /チケット|パスポート|入園料|入場料/;
+function ticketLinePartyViolations(
+  slot: string,
+  costBreakdown:
+    | { label: string; amountJpy?: number | null }[]
+    | null
+    | undefined,
+  party: { adults: number; children: number } | null,
+  ticketPrices: TicketPricesInput | null | undefined,
+): string[] {
+  if (!party || !ticketPrices) return [];
+  if (party.children > 0 && ticketPrices.childJpy == null) return [];
+  const expected =
+    ticketPrices.adultJpy * party.adults +
+    (ticketPrices.childJpy ?? 0) * party.children;
+  const out: string[] = [];
+  for (const line of costBreakdown ?? []) {
+    if (!TICKET_LINE_RE.test(line.label)) continue;
+    if (line.amountJpy == null) continue;
+    if (line.amountJpy !== expected) {
+      out.push(
+        `プラン${slot}: 費用の内訳のチケット代（${line.amountJpy.toLocaleString("ja-JP")}円）が、条件の人数（大人${party.adults}人${party.children > 0 ? `＋子ども${party.children}人` : ""}）に公式チケット単価を掛けた金額（${expected.toLocaleString("ja-JP")}円）と一致しません。費用計算に用いた人数が、このセットの条件スナップショットの人数と異なります（条件対応の不一致・クラス12）。条件の人数で費用を計算し直して再保存してください。`,
+      );
+    }
+  }
+  return out;
 }
 
 // ---------- crowd forecast: decide once per date （変更2） ----------
@@ -2342,14 +2396,15 @@ return null;
 // first: as-is, parenthetical suffix dropped, then the separator
 // strips in COMBINATION (＆ dropped with ・ kept — the form OSM
 // actually carries for ニモ＆フレンズ・シーライダー — ・ dropped with
-// ＆ kept, and both dropped), then the fully stripped form qualified
-// with the park name.
+// ＆ kept, and both dropped). Spec §10 bans qualifying the query with
+// the park or area name at EVERY stage (an appended park name can
+// zero out facilities the bare name would have found), so no
+// park-name variant is tried here.
 function facilityQueryVariants(
 name: string,
 park: "land" | "sea",
 ): string[] {
-const parkName =
-park === "sea" ? "東京ディズニーシー" : "東京ディズニーランド";
+void park;
 const noParen = name
 .replace(/（[^）]*）/g, "")
 .replace(/\([^)]*\)/g, "")
@@ -2357,23 +2412,68 @@ const noParen = name
 const noAmp = noParen.replace(/＆/g, "").replace(/&/g, "").trim();
 const noSep = noParen.replace(/・/g, "");
 const noBoth = noSep.replace(/＆/g, "").replace(/&/g, "").trim();
-const variants = [
-name,
-noParen,
-noAmp,
-noSep,
-noBoth,
-`${noBoth} ${parkName}`,
-];
+const variants = [name, noParen, noAmp, noSep, noBoth];
 return [...new Set(variants.filter((v) => v.length > 0))].slice(0, 6);
 }
 
 type CoordResolution = {
 lat: number;
 lng: number;
-via: "nominatim" | "area";
+via: "nominatim" | "area" | "venue";
 areaName: string | null;
+// For via === "venue" (spec §10 step (4)): the venue name read
+// from the run's official sources, whose own point stands in for
+// the show's pin. Null for the other routes.
+venueName?: string | null;
 };
+
+// Venue step (spec §10 step (4)): for a stage / theatre show the
+// name ladder cannot resolve, the venue name stated by THIS run's
+// official sources (the saved show / facility snapshots) is queried
+// on Nominatim as-is, and the venue's own point becomes the show's
+// pin — disclosed as 会場の地点 in the verification record. The
+// venue name comes ONLY from the saved official texts (never from
+// a bundled table); when no source states a venue, the step is
+// skipped. Extraction is deliberately narrow: the venue label
+// （会場 / 公演場所）must appear within a short window after the
+// show's own name in the same text.
+function extractVenueName(text: string, showName: string): string | null {
+const variants = [
+showName,
+showName.replace(/（[^）]*）/g, "").replace(/\([^)]*\)/g, "").trim(),
+];
+for (const v of variants) {
+if (!v) continue;
+const idx = text.indexOf(v);
+if (idx < 0) continue;
+const window = text.slice(idx, idx + 500);
+const m = window.match(
+/(?:会場|公演場所)\s*[:：]\s*([^\s、。・,，\n（(）)]{2,30})/,
+);
+if (m?.[1]) return m[1].trim();
+}
+return null;
+}
+
+async function findVenueNameFromSnapshots(
+ctx: Ctx,
+park: "land" | "sea",
+showName: string,
+): Promise<string | null> {
+const db = ctx.db<typeof schema>();
+const rows = await db
+.select()
+.from(schema.sourceSnapshots)
+.where(eq(schema.sourceSnapshots.park, park))
+.orderBy(desc(schema.sourceSnapshots.id))
+.limit(40);
+for (const r of rows) {
+if (r.kind !== "show_schedule" && r.kind !== "facility_list") continue;
+const v = extractVenueName(r.rawText, showName);
+if (v) return v;
+}
+return null;
+}
 
 // Resolves coordinates for the facilities still missing them after
 // payload + dictionary. `siblingsByArea` maps an area name to the
@@ -2386,12 +2486,15 @@ areaName: string | null;
 async function resolveMissingFacilityCoords(
 ctx: Ctx,
 park: "land" | "sea",
-missing: { name: string; area: string | null}[],
+missing: { name: string; area: string | null; kind?: string | null }[],
 siblingsByArea: Map<string, { lat: number; lng: number}>,
 dictByArea: Map<string, { lat: number; lng: number}>,
 ): Promise<Map<string, CoordResolution>> {
 const out = new Map<string, CoordResolution>();
-const byKey = new Map<string, { name: string; area: string | null}>();
+const byKey = new Map<
+string,
+{ name: string; area: string | null; kind?: string | null }
+>();
 for (const m of missing) {
 const key = facilityNameKey(m.name);
 if (!byKey.has(key)) byKey.set(key, m);
@@ -2436,6 +2539,32 @@ continue;
 // as the facility's coordinates (spec §10) — fall through to the
 // area representative point instead.
 hit = null;
+// Venue step (spec §10 step (4)): a stage / theatre show the name
+// ladder could not resolve takes the point of the venue the run's
+// official sources name for it. Tried before the area fallback;
+// skipped entirely when no saved source states a venue.
+if (m.kind === "show" || m.kind === "parade") {
+const venueName = await findVenueNameFromSnapshots(ctx, park, m.name);
+if (venueName) {
+const vhit = await nominatimQuery(venueName);
+if (vhit && coordsInParkRange(park, vhit.lat, vhit.lng)) {
+// The venue point is NOT the facility's own coordinates,
+// so it is never written into the facility dictionary (a
+// dictionary entry would make later saves treat the pin as
+// the facility's own point and drop this step's disclosure).
+// It lives only in this save's resolution map, and every
+// save re-derives and re-discloses it.
+out.set(key, {
+lat: vhit.lat,
+lng: vhit.lng,
+via: "venue",
+areaName: m.area,
+venueName,
+});
+continue;
+}
+}
+}
 if (m.area) {
 const p = await areaPoint(m.area);
 if (p) {
@@ -2534,7 +2663,7 @@ parkWideNotices: string[];
 }> {
 const db = ctx.db<typeof schema>();
 const siblingsByArea = new Map<string, { lat: number; lng: number}>();
-const missing: { name: string; area: string | null}[] = [];
+const missing: { name: string; area: string | null; kind: string | null}[] = [];
 const seenMissing = new Set<string>();
 // Park-wide facilities present in this save, by name key (display
 // name kept for the disclosure notice). They are handled by the
@@ -2576,7 +2705,7 @@ siblingsByArea.set(area, { lat, lng});
 const key = facilityNameKey(item.name);
 if (!seenMissing.has(key)) {
 seenMissing.add(key);
-missing.push({ name: item.name, area});
+missing.push({ name: item.name, area, kind: item.kind?? null});
 }
 }
 }
@@ -2610,6 +2739,11 @@ const r = fallback.get(facilityNameKey(m.name));
 if (r?.via === "area") {
 notices.push(
 `「${m.name}」の座標：施設自体はNominatimで引けなかったため、エリア「${r.areaName?? m.area?? ""}」の代表地点の座標で地図ピンを表示しています（施設の正確な位置ではありません）`,
+);
+}
+if (r?.via === "venue") {
+notices.push(
+`「${m.name}」の座標：施設自体はNominatimで引けなかったため、公式ソースに示された会場「${r.venueName?? ""}」の地点の座標で地図ピンを表示しています（会場の地点です）`,
 );
 }
 }
@@ -3551,6 +3685,31 @@ violations.push(
 return { count: count ?? partySize, violations };
 }
 
+// Why a fact build is incomplete, stated accurately: facilities with
+// no fact at all, and/or facilities whose fact is unknown (with the
+// recorded reason). A build knocked incomplete by an unknown fact
+// has an EMPTY missing list, so a message naming only the missing
+// list states a false reason with an empty enumeration (observed in
+// testing, 2026-11-20).
+function incompleteBuildDetail(gate: DpaFactGate): string {
+const parts: string[] = [];
+if (gate.missingNames.length > 0) {
+parts.push(
+`ファクトが無い施設があります：${gate.missingNames.slice(0, 10).join("、")}${gate.missingNames.length > 10 ? " ほか" : ""}`,
+);
+}
+const unknowns = gate.summary?.unknowns ?? [];
+if (unknowns.length > 0) {
+parts.push(
+`状態が不明な施設があります：${unknowns
+.slice(0, 10)
+.map((u) => `${u.name}（${u.reason}）`)
+.join("、")}${unknowns.length > 10 ? " ほか" : ""}`,
+);
+}
+return parts.length > 0 ? parts.join("。") : "完全性の条件を満たしていません";
+}
+
 // Judges ONE DPA-premise row against the fact gate. Returns the
 // unit price when the row passes; otherwise the violation text
 // (already carrying the caller's row prefix) and, for the unknown
@@ -3576,7 +3735,7 @@ violation: `${prefix}: 正規化ファクトのビルド（factBuildId）が渡�
 if (!gate.summary.complete) {
 return {
 ok: false,
-violation: `${prefix}: ファクトビルド（#${gate.build.id}）が不完全なため、DPA対象の照合ができません（母集合${gate.summary.universeCount}施設のうち、ファクトが無い施設があります：${gate.missingNames.slice(0, 10).join("、")}${gate.missingNames.length > 10 ? " ほか" : ""}）。欠けた施設を unknown＋理由つきで埋めてファクトを再登録し、完全なビルドの factBuildId を渡すか、DPA前提をやめて再保存してください。`,
+violation: `${prefix}: ファクトビルド（#${gate.build.id}）が不完全なため、DPA対象の照合ができません（母集合${gate.summary.universeCount}施設のうち、${incompleteBuildDetail(gate)}）。欠けた施設を unknown＋理由つきで埋めてファクトを再登録し、完全なビルドの factBuildId を渡すか、DPA前提をやめて再保存してください。`,
 };
 }
 const fact = gate.factsByKey.get(facilityNameKey(name));
@@ -3632,7 +3791,7 @@ return [
 }
 if (!gate.summary.complete) {
 return [
-`DPA対象・単価：未確認（ファクトビルド #${gate.build.id} が不完全なため：母集合${gate.summary.universeCount}施設のうち${gate.missingNames.length}施設にファクトがありません：${gate.missingNames.slice(0, 10).join("、")}${gate.missingNames.length > 10 ? " ほか" : ""}）`,
+`DPA対象・単価：未確認（ファクトビルド #${gate.build.id} が不完全なため：母集合${gate.summary.universeCount}施設のうち、${incompleteBuildDetail(gate)}）`,
 ];
 }
 return [];
@@ -4288,7 +4447,7 @@ SCOPE_BOUNDARY_STEP,
 `2d. 【不足分の一括取得（必須・このタスク専用スクリプト）】辞書で足りない静的属性（辞書に無い候補施設の座標・公式URL・エリア・公式所要時間・写真URL、期限切れ属性の取り直し）が必要になったら、その回専用の一括取得スクリプトを作成し、1回の実行でまとめて取得すること（何が要るかは依頼ごとに違うので、スクリプトは使い捨てでよい）。スクリプトには、公式一覧/詳細ページの静的フェッチと、不足座標の Nominatim 照会をまとめて含めること。Nominatim への照会は礼儀として1件ごとに1秒以上の間隔を空けること。ページを1枚ずつ自分のターンで開いていく方式は、まとめて取れるものについては禁止する（日付層の確認や、静的取得で取れなかったページのブラウザ表示による補完は除く）。取得できたら saveFacilities アクション（park="${c.park}"）で辞書に保存し、以降の計画作成は保存済みデータから行うこと。静的フェッチで取れなかった公式ページだけ、ブラウザ表示で開いて補ってよい。【レストランのファクト登録（必須）】プランに使うレストランについては、その施設自身の公式レストラン詳細ページから、根拠つきのファクトをレストラン事実レイヤーに登録すること（分類を施設辞書の列に書く方式は廃止した。行の表示はファクトから導出され、プランの行データに分類は入れない）。手順は DPA と同じ規律で：(i) 詳細ページを開き、読む前に saveSourceSnapshots（kind="restaurant_detail"、park="${c.park}"、fetchMethod は実際の取得方法、completeness は {expectationSource: "none", expectation: "レストラン詳細ページには件数宣言が無いため完全性の期待値は導けない", result: "not_derivable"}）で全文を保存する。(ii) 保存した本文を読んで、saveRestaurantFacts（park="${c.park}"）で {name（公式の施設名）, serviceType（ページのサービスタイプの表記そのまま。無ければ null）, snapshotId, reservation, mobileOrder} を登録する。reservation は {type: "required"（予約必須）／"ps"（プライオリティ・シーティング対象）／"none"（予約の経路なし）／"unknown"（未確認）, evidenceKind, evidence（保存した本文からの逐語抜粋）, unknownReason（unknown のとき必須）}、mobileOrder は {type: "available"（モバイルオーダー対象）／"not_available"（対象外）／"unknown", 同じ形}。肯定分類（required／ps／available）は、分類を裏づける表記を含む抜粋（evidenceKind="excerpt"）でなければ登録できない。否定分類（none／not_available）は原則として不在の根拠（evidenceKind="absence"、evidence は施設名を含む一節）で登録する——詳細ページ全文に予約・モバイルオーダーの存在マーカーが無いことを、サーバーが機械確認する（モバイルオーダーの対象外がページに明記されている場合だけ、その表記を含む抜粋でもよい）。公式の記述から読み取れない項目は "none"／"not_available" に倒さず、必ず "unknown"＋理由で登録すること。分類をラベルや印象から推測で作ってはいけない（例：「ショーレストランだから予約必須」「カウンター式だからモバイルオーダー対象だろう」は禁止——ショーダイニングエリアだけが予約必須で、本体のレストランは予約なし・モバイルオーダー対象、という二重構造の店が実在する）。公式一覧で別エントリとして載っている施設（本体とショーダイニングエリア等）は混ぜずに別々のファクトとし、それぞれ自身の詳細ページを根拠に登録すること。getFacilityDictionary の restaurantFact に有効なファクト（登録から180日以内）がある施設は再利用し、詳細ページの再取得・再登録はしないこと。`,
 `2e. 【検証プロセス（保存直前・必須）】3プランが完成したら、savePlanSet を呼ぶ前に、手順1aでこの回に取得した公式データと完成した行を突き合わせて、次の全てを自分で照合すること。savePlanSet 側でも同じ照合が機械的に行われ、通らないプランは保存を拒否される（拒否されたら指摘を直してもう一度呼ぶこと。失敗報告はしない）。(1) DPA対象可否：passType がディズニー・プレミアアクセスの全行が、手順1aで登録した正規化ファクト（完全なビルド）で「対象（eligible）」と記録された施設でなければならない。サーバーはそのファクトだけを根拠に照合するので、対象外（not_eligible）や不明（unknown）の施設へのDPA設定は絶対に置かない。加えて、ファクトに適用期間（開始日／終了日）が記録された施設については、サーバーは来園日時点で有効な対象かどうかも照合する。適用開始日が来園日より後の施設（将来の対象拡大で追加される施設など）や、適用終了日を過ぎた施設には、その来園日にはDPA前提を付けないこと（スタンバイで組む）。どうしても入れたい施設が対象外なら、DPA前提をやめてスタンバイの推定待ち時間で組み直すか、理由を notes に書いて外す。(2) DPA単価（購入した時に計上）：DPA費用は「購入した時」にだけ計上する。DPAを買う購入ごとに購入イベント行（kind: "purchase"）を1行入れ、その行にファクト単価（1名分）を unitPriceJpy として持たせ、さらに purchaseCount として「そのプランでその施設を実際に利用する人数」を必ず持たせること（アトラクションは実際に乗る人数、ショーのDPA鑑賞エリアは実際にそのエリアで鑑賞する人数。全員が利用する場合のみ参加者総数。参加者全員が買う前提で総数を入れてはいけない）。費用内訳のDPA金額は、購入イベント行ごとにファクト単価×対象人数（purchaseCount）を1回ずつ合計した額でなければならない——サーバーも購入インスタンス（施設×購入イベント）単位でファクト単価×対象人数から再計算するので、使用行（アトラクション／ショー行）でも計上して二重に数えたり、自分の書き起こしや記憶の単価（古い料金）で計算すると拒否される（クラス2：DPA費用の計上不一致）。対象人数が無い購入イベント行、対象人数が1未満または参加者総数（大人＋子ども）を超える購入イベント行もクラス2で拒否される。使用行には unitPriceJpy を入れないこと（入れてもサーバーは無視するが、形として入れない）。購入イベント行の単価がファクト単価と異なる場合もクラス2で拒否される。合計（estimatedCostJpy）も内訳の合計と一致させる。(3) 休止・営業時間・公演時刻：各行の施設が対象日の休止一覧に無いこと、各行の時刻が営業時間内であること（開始時刻だけでなく、公式所要時間が分かる行は終了時刻＝開始時刻＋所要時間も、退園時刻と閉園時刻の早い方を超えないこと。超える行はクラス4（営業時間外・終了側）で拒否される。所要時間が分からない行は終了側では判定されない。上限ちょうどに終わる行は範囲内）、ショー/パレードの開始時刻が対象日の公式公演時刻と一致すること。(4) DPA購入順序：公式ルール「次のDPAは、前のDPAの購入から60分後、または前のパスの利用開始時刻の早い方から購入できる」で購入列が成立すること。各DPA行には購入時刻を dpaPurchaseTime として必ず入れる（プラン内に購入時刻が明示される）。(5) 照合できなかった項目（ページ取得失敗など）は、黙って通さず verification.unverified に「◯◯：未確認（理由）」の形で入れること。未確認の項目は notes にも「未確認」と明示される。`,
 `2f. 【未確定要素の扱い（必須）】その回の材料では公式に確認できなかった値を仮定として置く要素（未確定要素）は、理由を添えればプランに入れてよい（未確定であることだけを理由に一律に除外しなくてよい）。対象はショー時刻に限らず、未確定の要素全般である（例：公式スケジュールが未発表の期間のショー公演時刻、対象日の公演時刻が「未定」のショー行、取得できなかった施設の属性値）。ただし、未確定の要素を、印も理由もなく確定したもののように置くことは絶対に禁止する。入れる場合は、その項目に unconfirmedReason（短い理由。例「公式スケジュール未発表」「公演時刻未定」）と unconfirmedNote（なぜ未確定かの説明。分かる場合は公式の掲載予定時期も含める。例「公式のスケジュールがまだ出ていません。翌月分は前月8日ごろに掲載されます」）を必ず入れること（手順4）。画面ではその行に「未確定（理由）」の印が付き、PDFにも載る。検証の記録の未確認リストへの記載は、行に入れた理由・説明からアプリ側が自動で整合させて載せる（行側が正本）ので、verification.unverified に同じ未確定を重ねて書かないこと。【検証ゲートとの関係】公式公演時刻が存在しない（未発表・未定）場合に、未確定として明示したショー行は、公演時刻不一致（クラス5）では拒否されない。逆に、公式公演時刻が存在するのに別の時刻を置いた行は、未確定の印を付けてもクラス5で拒否される——未確定は不一致の言い訳にならない。公演時刻が存在するショーは、必ずその公式時刻に合わせること。`,
-`3. 座標の解決は次の優先順位で行う。(a) 作り直しの引き継ぎ値、(b) 施設辞書（coordsUsable=true のもの）、(c) 手順2dの一括取得スクリプト内での Nominatim 照会。座標検索に使ってよいのは OpenStreetMap の Nominatim（nominatim.openstreetmap.org）だけとする。Overpass API をはじめ、他のジオコーダ・座標取得サービスへ無断で切り替えてはいけない。日本語名で見つからなければ、表記のゆれ（略称・カタカナ/英語名・記号の有無など）や、パーク名・エリア名を加えた絞り込みで再試行すること（再試行もスクリプト内でまとめて行う）。確信を持って引けた場合だけ座標を入れ、Nominatim で引けない項目は座標なし（null）にする。座標を推測で作らないこと。座標が引けなかった施設は、notes にその旨を明記すること（どの施設が座標なしになったか分かるように）。なお座標の最終結果は、保存時にサーバー側でも表記ゆれのバリエーションで Nominatim の再照会が行われて確定し、施設自体がどうしても引けない場合はエリアの代表地点の座標でピンが表示され、その旨が検証の記録に残る。例外として、エリアがパークワイドのショー（花火など）は、施設名で引けた地点がパーク外の橋の上など無関係な場所であることがあるため使われず、座標はサーバーがパークの代表地点（シーはメディテレーニアンハーバー、ランドはワールドバザール）に置き換える（ペイロードや辞書に何が入っていても置き換わる）。notes には照会を試みた事実だけを書き、「座標なしで確定」とは書かないこと。`,
+`3. 座標の解決は次の優先順位で行う。(a) 作り直しの引き継ぎ値、(b) 施設辞書（coordsUsable=true のもの）、(c) 手順2dの一括取得スクリプト内での Nominatim 照会。座標検索に使ってよいのは OpenStreetMap の Nominatim（nominatim.openstreetmap.org）だけとする。Overpass API をはじめ、他のジオコーダ・座標取得サービスへ無断で切り替えてはいけない。日本語名で見つからなければ、第10節の固定順序で再試行すること（そのままの形→検索範囲を対象パーク周辺に制限した再照会→機械的な表記ゆれ（記号の正規化・副題を落とした短縮形・英語名））。パーク名やエリア名を施設名に付け足した形は、どの段階でも照会に使ってはならない（再試行もスクリプト内でまとめて行う）。確信を持って引けた場合だけ座標を入れ、Nominatim で引けない項目は座標なし（null）にする。座標を推測で作らないこと。座標が引けなかった施設は、notes にその旨を明記すること（どの施設が座標なしになったか分かるように）。なお座標の最終結果は、保存時にサーバー側でも表記ゆれのバリエーションで Nominatim の再照会が行われて確定し、施設自体がどうしても引けない場合はエリアの代表地点の座標でピンが表示され、その旨が検証の記録に残る。例外として、エリアがパークワイドのショー（花火など）は、施設名で引けた地点がパーク外の橋の上など無関係な場所であることがあるため使われず、座標はサーバーがパークの代表地点（シーはメディテレーニアンハーバー、ランドはワールドバザール）に置き換える（ペイロードや辞書に何が入っていても置き換わる）。notes には照会を試みた事実だけを書き、「座標なしで確定」とは書かないこと。`,
 `4. 結果を保存アクションに渡す。planSetId は ${planSetId}。factBuildId には、手順1aで登録した完全なファクトビルドの id を必ず入れること（factBuildId が無い／不完全なビルドでは、DPA前提の行は全て拒否される）。crowdLevel（手順1cの混雑予想の段階。判断できなかった場合は null）、crowdBasis（根拠の短い文章）、crowdWaitFactors（プランごとに施設別の実効係数の一覧：[{slot, name, factor}]）も必ず入れること。ticketPrices（費用の床の根拠：{adultJpy: 対象日の公式1デーパスポート大人単価, childJpy: 子ども単価（子どもがいない場合は null）, snapshotId: 手順1aで保存した ticket_prices スナップショットの id}）も必ず入れること — サーバーは申告単価をそのスナップショットの本文と機械照合し、内訳の自己申告額だけでは床を計算しない。各プランの混雑シナリオ（A＝激混み前提／B＝やや混み前提／C＝思ったより空いてる前提）とシナリオ段階は、slot と crowdLevel からアプリ側が自動で記録するので、渡す必要はない。plans は slot が A/B/C の3件で、各プランに estimatedCostJpy（チケット代を含む総額）と costBreakdown（内訳の配列：{label: 項目名（例「チケット」「DPA」「食事」「お土産」）, amountJpy: 金額, note: 補足、なければ null。DPAの行の note は、購入ごとに「単価×対象人数」が分かる表記で書くこと（例：「ソアリン 2,500円×2名、アナとエルサのフローズンジャーニー 2,000円×4名」のように、購入1件ごとに単価と対象人数を並べる。全員分でない購入があるのに「（4名分）」のような一括表記にしてはいけない）}。内訳の amountJpy の合計は estimatedCostJpy と一致させること）を入れる。【予算超過の開示（クラス13・必須）】各プランについて、費用合計（estimatedCostJpy）が条件の予算を超える場合は、予算超過を開示する文面をそのプランの budgetDisclosure として必ず渡し、同じ開示をそのプランの summary（プランの説明）にも含めること。開示のない予算超過はクラス13（予算対応の不一致）として保存を拒否される（予算超過そのものは、開示があれば通る）。予算内のプランでは budgetDisclosure は不要（null でよい）。各 items は回る順に sortOrder 0,1,2... とし、timeLabel（例 \"9:00\"）、name（公式の施設名。ただし手順2a4の「最初の10分」行だけは name「入園後の最初の10分」）、kind（attraction/show/parade/restaurant/break/move/other/purchase/first10）、area（公式のエリア名）、note（狙い目などの短いメモ。アトラクションについては公式の所要時間を「所要約◯分」の形で必ず含め、推定待ち時間とは分けて書くこと——待ち時間と体験時間を混同させる書き方は禁止）、passType（その項目で使う/狙うパスがあればその名称、なければ null）、dpaPurchaseTime（passType がディズニー・プレミアアクセスの項目には、そのパスを買う時刻を "9:05" の形で必ず入れること。手順2e(4)の購入列が成立する時刻にする。それ以外の項目は null）、unconfirmedReason／unconfirmedNote（手順2fの未確定要素を含む項目には、短い理由と説明を必ず入れる。それ以外の項目は null）【購入イベント行】DPAを使う項目については、その購入のタイミングに購入イベント行を別に1行入れること：kind は "purchase"、name は施設の公式名そのまま、timeLabel と dpaPurchaseTime に購入時刻、passType にパス名、unitPriceJpy にファクト単価（1名分）、purchaseCount に対象人数（そのプランでその施設を実際に利用する人数。アトラクションは実際に乗る人数、ショーのDPA鑑賞エリアは実際にそのエリアで鑑賞する人数。全員が利用する場合のみ参加者総数。必須：無い・1未満・参加者総数超はクラス2で拒否される）。座標（lat/lng）・estWaitMin・imageUrl は入れない（null）。使用行（実際に入るアトラクション／ショー行）には unitPriceJpy を入れない、estWaitMin（推定待ち時間＝分単位の整数。kind が attraction の項目には必ず入れること。0も有効な値で、省略・null は禁止。DPA等のパスで入る項目はパス利用時の待ちで見積もる。ショー/パレード等で待ちの推定がある項目にも入れてよい。それ以外の項目は null）。ただしレストラン行（kind=restaurant）には推定待ち時間（estWaitMin）を付けないこと（必ず null にする）。レストランの待ち時間はモデル化しない（レストランは事前に準備してある前提で組むため。付けてもサーバー側で保存時に null に落とされる）、lat/lng を含める。さらに、具体的な施設・アトラクション・ショー・レストランに対応する items には officialUrl として、その施設の公式詳細ページのURL（実際に開いたページのURLそのもの）を入れること（画面の各行から公式ページへリンクするために使う。詳細ページを開かなかった施設は null）。加えて imageUrl として、その施設の公式詳細ページに載っている代表写真（メインビジュアル）の画像URLを、実際に読んだページからそのまま入れること（保存時にアプリ側が画像本体を取得して保持する）。移動・休憩・入園など特定の施設でない項目や、公式ページで写真URLを確認できなかった項目は imageUrl を null にする。公式写真が確認できなかった施設については、Wikimedia Commons（commons.wikimedia.org）でその施設本人の写真が見つかれば、そのファイルページに表示される幅500px前後のサムネイル画像のURL（thumb.wikimedia.org のURL。原寸URLは使わない）を referenceUrl に入れてよい（アプリ側は公式写真が取得できない場合の参考画像として使う。見つからなければ null）。画像URLを推測で作らないこと。sources には実際に読んだ公式ページのタイトルとURLを入れる。estimateSources には、待ち時間の推定材料として実際に読んだ参考サイトについて {title: サイト名, url: URL, fetchedAt: 取得日（今日の日付 ${today}）} を入れること（公式の sources とは分けて記録する。読まなかった参考サイトは入れない）。notes には、休止情報や制度上の注意など計画の前提に加えて、待ち時間の推定についても箇条書きで書くこと：どの参考サイトを材料にしたか、取得日（今日は ${today}）、材料が取れなかった施設があればその旨、取得できなかった参考サイトがあればその旨。1項目につき1行、短い文で、行頭に「・」を付けない（画面側で箇条書きとして表示する）。長い文章を1つの段落に詰め込まないこと。parkHours には対象日の営業時間（公式表記）を入れる。【検証データ（必須）】verification として、手順1aでこの回に実際に取得したデータをそのまま入れること：{fetchedAt: 取得日（今日の日付 ${today}）, dpaSource: DPA案内ページの {title, url}（取得できなければ null）, calendarSource: 休止・営業時間を確認したページの {title, url}, entertainmentSource: 公演時刻を確認したページの {title, url}, dpaSnapshotText: 渡さなくてよい（DPAの照合は正規化ファクトだけで行われる。生テキストは手順1aで source_snapshots に保存済み）, closedFacilities: 対象日の休止施設名の配列, showTimes: [{name: ショー/パレード名, times: ["9:40", ...]（対象日の公式公演時刻）}] の配列, unverified: 照合できなかった項目の説明の配列（無ければ空配列）}。取得していないデータを推測で入れないこと（入れれば照合はその偽データで通ってしまう——それが一番悪い）。取得できなかったものは、該当欄を空/null にし、unverified に理由を入れること。【保存時の追加報告（必須）】metrics として {pagesOpened: このタスクで実際に開いた/取得したページの総数（スクリプトで取得したページも数える）, phases: [{name: フェーズ名（例: 辞書確認・一括取得・日付層の確認・待ち時間材料の取得・プラン作成・保存）, seconds: そのフェーズにかかった秒数}]} を入れ、waitSourceFetchResults として、登録されている参考サイト全件について {url, method: "script"（静的取得で取れた）|"browser"（ブラウザ表示で取れた）|"failed"（どちらでも取れなかった）} を入れること（次回の取得方法の記録になる）。【辞書で足りた施設について】辞書に写真がある施設（imageFresh=true）は、items の imageUrl/referenceUrl は null でよい（保存時に辞書の写真が使われる）。辞書・引き継ぎで得た座標・公式URL・エリアは、items にその値のまま入れること。`,
 `5. 公式サイトが読めない等で計画が作れない場合は、失敗報告アクション（reportPlanFailure、planSetId=${planSetId}）で理由を伝えること。作れなかった計画をでっち上げないこと。ただし、savePlanSet が「推定待ち時間が不足」「スケジュールが推定待ち時間と矛盾」「移動時間（travel_min）に対して間隔が不足」といった検証エラーで保存を拒否した場合は、計画が作れなかったのではなく保存内容の問題なので、失敗報告はせず、指摘された項目の estWaitMin を補う／時刻を直して、savePlanSet をもう一度呼ぶこと。検証プロセス（手順2e）の拒否——ファクトで対象と記録されていない施設へのDPA設定、ファクトの単価と合わないDPA費用、休止施設の混入、営業時間外の時刻、公式公演時刻と合わないショー、60分ルールを満たさないDPA購入列、DPA購入時刻の未記入——も全て同じ扱いで、指摘された行を組み直す／単価と内訳を再計算する／購入時刻を直して、savePlanSet をもう一度呼ぶこと。検証を通らないプランを「完成」として報告してはいけない。また、起草の途中で要求同士がどう調整しても両立しないことが明確になった場合（手順1dの固定の無理パターンに当たる場合を含む）は、失敗報告ではなく reportImpossibleRequest（planSetId=${planSetId}、findings に分類と具体名つきの理由。理由は客観的事実の指摘までとし、具体的な改善案・処方箋は約束形・提案形のいずれでも書かない）で報告すること。それが無理な要求への正直な出口であり、骨組みや仮の内容を完成として保存することは絶対にしないこと。`,
 ].join("\n");
@@ -5031,7 +5190,7 @@ SCOPE_BOUNDARY_STEP,
 `2c. 【進捗報告（必須）】プランの作成を実際に始める前に、進捗報告アクション（updatePlanProgress、planSetId=${planSetId}、slot="A"、status="generating"）を呼ぶこと。当日検索はプランAの1件だけなので、報告もAだけ行う。保存は savePlanSet で行い、保存された時点で「完了」になる。自分から「完了」を報告してはいけない。`,
 `2d. 【不足分の一括取得】辞書で足りない静的属性（候補施設や現在地点の座標・公式URL・エリア・公式所要時間・写真URL）が必要になったら、その回専用の一括取得スクリプトを作成し、1回の実行でまとめて取得すること（公式一覧/詳細ページの静的フェッチと、不足座標の Nominatim 照会を含む。Nominatim への照会は1件ごとに1秒以上の間隔を空ける）。取得できたら saveFacilities アクション（park="${sd.park}"）で辞書に保存すること。レストランについては、分類を辞書の列に書かず、その施設自身の公式レストラン詳細ページを saveSourceSnapshots（kind="restaurant_detail"、park="${sd.park}"、completeness は {expectationSource: "none", expectation: "レストラン詳細ページには件数宣言が無いため完全性の期待値は導けない", result: "not_derivable"}）で全文保存してから、saveRestaurantFacts（park="${sd.park}"）で根拠つきファクトとして登録すること：reservation は {type: "required"（予約必須）／"ps"（プライオリティ・シーティング対象）／"none"（予約の経路なし）／"unknown"（未確認＋理由）, evidenceKind, evidence（保存した本文からの逐語抜粋）}、mobileOrder は {type: "available"（対象）／"not_available"（対象外）／"unknown"（未確認＋理由）, 同じ形}、serviceType はページのサービスタイプの表記そのまま。肯定分類は裏づけ表記を含む抜粋（evidenceKind="excerpt"）でのみ登録でき、否定分類は原則として不在の根拠（evidenceKind="absence"、evidence は施設名を含む一節。全文に存在マーカーが無いことをサーバーが機械確認する）で登録する。読み取れない項目は "none"／"not_available" に倒さず必ず "unknown"＋理由とし、分類をラベルから推測で作らないこと（ショーダイニングエリアだけが予約必須で本体は予約なし、という二重構造の店がある。公式一覧で別エントリの施設は別々のファクトにすること）。getFacilityDictionary の restaurantFact に有効なファクトがある施設は再利用してよい。`,
 `2e. 【検証プロセス（保存直前・必須）】プランが完成したら、savePlanSet を呼ぶ前に、手順1aで取得した公式データと完成した行を突き合わせて照合すること。savePlanSet 側でも同じ照合が機械的に行われ、通らないプランは保存を拒否される（拒否されたら指摘を直してもう一度呼ぶこと。失敗報告はしない）。(1) DPA対象可否：DPA前提の全行が、手順1aで登録した正規化ファクト（完全なビルド）で「対象（eligible）」と記録された施設でなければならない。対象外（not_eligible）や不明（unknown）の施設へのDPA設定は絶対に置かない（スタンバイで組み直すか外す）。加えて、ファクトに適用期間（開始日／終了日）が記録された施設は、本日時点で有効な対象かどうかもサーバーが照合する。適用開始日が今日より後の施設にはDPA前提を付けないこと。(2) DPA単価（購入した時に計上）：DPA費用は「購入した時」にだけ計上する。購入ごとに購入イベント行（kind: "purchase"、unitPriceJpy にファクト単価、purchaseCount に対象人数＝そのプランでその施設を実際に利用する人数。アトラクションは実際に乗る人数、ショーのDPA鑑賞エリアは実際にそのエリアで鑑賞する人数。全員が利用する場合のみ参加者総数${sd.adults + sd.children}名。参加者全員が買う前提で総数を入れてはいけない）を1行入れ、費用内訳のDPA金額は購入イベント行ごとにファクト単価×対象人数を1回ずつ合計した額にすること。使用行では計上しない（使用行に unitPriceJpy は入れない）。購入イベント行の単価がファクトと異なる場合、対象人数が無い・1未満・参加者総数（大人${sd.adults}＋子ども${sd.children}＝${sd.adults + sd.children}名）を超える場合はクラス2で拒否される。(3) 休止・営業時間・公演時刻：各行の施設が本日の休止一覧に無いこと、各行の時刻が本日の営業時間内かつ指定時刻以降であること（公式所要時間が分かる行は終了時刻＝開始時刻＋所要時間も閉園時刻を超えないこと。超える行はクラス4（営業時間外・終了側）で拒否される。閉園ちょうどに終わる行は範囲内）、ショー/パレードの開始時刻が本日の公式公演時刻と一致すること（公式公演時刻が存在しない場合に限り、未確定として理由と説明を行に明示したショー行は例外とする。公演時刻が存在するのに異なる時刻は、未確定の印があっても拒否される）。(4) DPA購入順序：60分ルールで購入列が成立し、各DPA行に購入時刻が入っていること。(5) 照合できなかった項目は verification.unverified に「◯◯：未確認（理由）」の形で入れること。`,
-`3. 座標の解決は (a) 施設辞書（coordsUsable=true のもの）、(b) 手順2dの一括取得スクリプト内での Nominatim 照会 の順で行う。座標検索に使ってよいのは OpenStreetMap の Nominatim（nominatim.openstreetmap.org）だけとする。Overpass API をはじめ、他のジオコーダへ切り替えてはいけない。日本語名で見つからなければ、表記のゆれやパーク名・エリア名を加えた絞り込みで再試行すること。確信を持って引けた場合だけ座標を入れ、引けない項目は座標なし（null）にし、その旨を notes に明記すること。座標を推測で作らないこと。エリアがパークワイドのショー（花火など）は、施設名で引けた地点がパーク外の無関係な場所であることがあるため使われず、座標はサーバーがパークの代表地点（シーはメディテレーニアンハーバー、ランドはワールドバザール）に置き換える。`,
+`3. 座標の解決は (a) 施設辞書（coordsUsable=true のもの）、(b) 手順2dの一括取得スクリプト内での Nominatim 照会 の順で行う。座標検索に使ってよいのは OpenStreetMap の Nominatim（nominatim.openstreetmap.org）だけとする。Overpass API をはじめ、他のジオコーダへ切り替えてはいけない。日本語名で見つからなければ、第10節の固定順序で再試行すること（そのままの形→検索範囲を対象パーク周辺に制限した再照会→機械的な表記ゆれ（記号の正規化・副題を落とした短縮形・英語名））。パーク名やエリア名を施設名に付け足した形は、どの段階でも照会に使ってはならない。確信を持って引けた場合だけ座標を入れ、引けない項目は座標なし（null）にし、その旨を notes に明記すること。座標を推測で作らないこと。エリアがパークワイドのショー（花火など）は、施設名で引けた地点がパーク外の無関係な場所であることがあるため使われず、座標はサーバーがパークの代表地点（シーはメディテレーニアンハーバー、ランドはワールドバザール）に置き換える。`,
 `4. 結果を保存アクション（savePlanSet）に渡す。planSetId は ${planSetId}。factBuildId には、手順1aで登録した完全なファクトビルドの id を必ず入れること（無い／不完全なビルドではDPA前提の行は全て拒否される）。plans は slot が "A" の1件だけを入れること（B・Cを入れてはいけない）。title は「当日プラン（${sd.startTime}から）」のように当日検索と分かる名前にし、summary には現在地点・開始時刻・ご要望への対応が分かるように書くこと。【プランの最低内容（クラス11・厳守）】費用合計と金額入りの内訳を必ず入れ、スケジュールにはアトラクション／ショーの実項目を少なくとも1つ含めること（現在地点と退園などのマーカー行だけの骨組みは不可）。アトラクション行とショー行には推定待ち時間（estWaitMin）を必ず入れること（0分でも入れる）。欠けた提出はクラス11として保存を拒否され、セットが失敗として記録される。タイトルがテスト／仮置きパターン（「テスト」「test」「仮置き」等）に一致するもの、要約が1文字・定型文のみ・空白を除き10文字未満のものもクラス11で拒否される（タイトルは当日検索と分かる実タイトルにし、要約には現在地点・開始時刻・ご要望への対応が分かる実質のある文章を書くこと。当日検索には実項目数の床とチケット代の床は適用されない）。estimatedCostJpy はこれからかかる費用の総額、costBreakdown は内訳の配列（{label, amountJpy, note}。チケット代は含めない。合計は estimatedCostJpy と一致させること。DPAの行の note は、購入ごとに「単価×対象人数」が分かる表記で書くこと（例：「ソアリン 2,500円×2名」のように購入1件ごとに単価と対象人数を並べる）。各 items は回る順に sortOrder 0,1,2... とし、先頭は手順どおり現在地点の項目、続けて timeLabel（例 "15:00"）、name（公式の施設名。先頭の現在地点だけは現在地点の表記そのまま）、kind（attraction/show/parade/restaurant/break/move/other/purchase）、area（公式のエリア名）、note（アトラクションについては公式の所要時間を「所要約◯分」の形で必ず含め、推定待ち時間と分けて書くこと）、passType（使う/狙うパスがあればその名称、なければ null）、dpaPurchaseTime（DPAの項目には購入時刻を必ず入れる。それ以外は null）、unconfirmedReason／unconfirmedNote（公式に確認できなかった値を仮定として置く項目には、短い理由と説明を必ず入れる。例：公演時刻が未定のショー。それ以外の項目は null。未確定の要素を、印も理由もなく確定したもののように置くことは禁止。公式公演時刻が存在するのに異なる時刻を置いた行は、未確定の印を付けてもクラス5で拒否される）【購入イベント行】DPAを使う項目については、その購入のタイミングに購入イベント行を別に1行入れること：kind は "purchase"、name は施設の公式名そのまま、timeLabel と dpaPurchaseTime に購入時刻、passType にパス名、unitPriceJpy にファクト単価（1名分）、purchaseCount に対象人数（そのプランでその施設を実際に利用する人数。アトラクションは実際に乗る人数、ショーのDPA鑑賞エリアは実際にそのエリアで鑑賞する人数。全員が利用する場合のみ参加者総数。必須：無い・1未満・参加者総数超はクラス2で拒否される）。座標（lat/lng）・estWaitMin・imageUrl は入れない（null）。使用行（実際に入るアトラクション／ショー行）には unitPriceJpy を入れない、estWaitMin（アトラクションには必ず入れる。0も有効、省略・null は禁止。パスで入る項目はパス利用時の待ちで見積もる。ただしレストラン行（kind=restaurant）には付けないこと（nullにする）。レストランの待ち時間はモデル化しない（事前に準備してある前提））、lat/lng を含める。具体的な施設に対応する items には officialUrl（実際に開いた公式詳細ページのURLそのもの。開かなかった施設は null）と imageUrl（その施設の公式詳細ページの代表写真の画像URL。確認できなかった項目は null。辞書に写真がある施設は null でよい）を入れること。公式写真が確認できなかった施設は、Wikimedia Commons でその施設本人の写真が見つかれば、幅500px前後のサムネイル画像URL（thumb.wikimedia.org）を referenceUrl に入れてよい。画像URLを推測で作らないこと。sources には実際に読んだ公式ページのタイトルとURLを入れる。estimateSources には、現在の待ち時間の材料として実際に読んだ参考サイトについて {title, url, fetchedAt: 取得日（今日の日付 ${today}）} を入れること。notes には箇条書きで（1項目1行、行頭に「・」を付けない）：当日検索であること（現在地点・指定時刻）、現在の待ち時間を材料にしたことと取得日（今日は ${today}）、材料が取れなかった施設・取得できなかった参考サイトがあればその旨、休止情報や制度上の注意、座標が引けなかった施設があればその旨。parkHours には本日の営業時間（公式表記）を入れる。【検証データ（必須）】verification として、手順1aで実際に取得したデータをそのまま入れること：{fetchedAt: 取得日（今日の日付 ${today}）, dpaSource: DPA案内ページの {title, url}（取得できなければ null）, calendarSource: 休止・営業時間を確認したページの {title, url}, entertainmentSource: 公演時刻を確認したページの {title, url}, dpaSnapshotText: 渡さなくてよい（DPAの照合は正規化ファクトだけで行われる。生テキストは手順1aで source_snapshots に保存済み）, closedFacilities: 本日の休止施設名の配列, showTimes: [{name, times: [...]}] の配列, unverified: 照合できなかった項目の説明の配列（無ければ空配列）}。取得していないデータを推測で入れないこと。【保存時の追加報告（必須）】metrics として {pagesOpened: 実際に開いた/取得したページの総数, phases: [{name, seconds}]} を入れ、waitSourceFetchResults として、登録されている参考サイト全件について {url, method: "script"|"browser"|"failed"} を入れること。`,
 `5. 公式サイトが読めない等でプランが作れない場合は、失敗報告アクション（reportPlanFailure、planSetId=${planSetId}）で理由を伝えること。作れなかった計画をでっち上げないこと。ただし、savePlanSet が検証エラーで保存を拒否した場合は、失敗報告はせず、指摘された項目を直して savePlanSet をもう一度呼ぶこと。`,
 ].join("\n");
@@ -5380,7 +5539,7 @@ areaMatrixLines,
 `・移動（move）の項目には、移動先の施設・エリアの座標を lat/lng に入れること（移動時間の計算に使う）。座標が引けない施設が絡む区間は移動時間が「未確認」となり、その区間の検証は従来の下限（推定待ち＋10分）で行われ、検証の記録に未確認と残る。`,
 `2. プラン${slot}を作り直す。セット共通の「重視する点」（単一の入力）と、このプランの混雑シナリオ前提に沿い、入園〜退園の時間枠の中で、時刻つきのタイムライン（移動・食事・休憩を含む現実的な順序）にする。対象日に休止中の施設は入れない。ショー/パレードは公式の開催時刻に合わせる（公式の公演時刻が未発表・未定で存在しない期間については、下記の未確定要素の作法——行に理由と説明を付ける——でのみ入れてよい）。概算費用は、パークチケット代を含む1日分の総額（円）とし、内訳（チケット代、有料パス代、食事代の目安、お土産代の目安など）の合計が総額と一致するようにする。`,
 `2b. 【スケジュールの時刻計算（最重要・厳守）】各項目の開始時刻は、その項目の「推定待ち時間＋体験時間（公式の所要時間）＋次の場所への移動時間（travel_min。上記の【移動時間の計算】の式でサーバーが決める値で、余裕はその中に含まれる）」が、次の項目の開始時刻までに収まるように決めること。travel_min は上記の式で自分でも概算できるので、その概算を下回る間隔は絶対に組まないこと。常に少し余裕を持たせる。禁止例: 11:20開始のアトラクション（推定待ち40分）の次を12:00にする——待ち40分だけで12:00になり、体験時間も移動時間も存在しない。このような「推定待ち時間と矛盾するスケジュール」は絶対に作らない。保存する前に、隣り合う全ペアについて「次の開始時刻 − この開始時刻 ≧ 推定待ち時間＋体験時間＋travel_min（上記の式で概算したもの）」を検算し、満たさないペアがあれば時刻を直してから保存すること。パスを使う項目は、パス利用時の待ち（短い方）で見積もってよいが、その場合は passType にパス名を必ず入れること。`,
-`2c. 【座標の解決】優先順位は (a) 差し替え元の引き継ぎ値、(b) 施設辞書（coordsUsable=true のもの）、(c) 不足分の一括取得スクリプト内での Nominatim 照会。座標検索に使ってよいのは OpenStreetMap の Nominatim（nominatim.openstreetmap.org）だけとし、Overpass API をはじめ他のジオコーダへ切り替えてはいけない。日本語名で見つからなければ、表記のゆれやパーク名・エリア名を加えた絞り込みで再試行すること。確信を持って引けた場合だけ座標を入れ、引けない項目は座標なし（null）にする。座標を推測で作らないこと。なお座標の最終結果は、保存時にサーバー側でも表記ゆれのバリエーションで Nominatim の再照会が行われて確定し、施設自体がどうしても引けない場合はエリアの代表地点の座標でピンが表示され、その旨が検証の記録に残る。例外として、エリアがパークワイドのショー（花火など）は、施設名で引けた地点がパーク外の橋の上など無関係な場所であることがあるため使われず、座標はサーバーがパークの代表地点（シーはメディテレーニアンハーバー、ランドはワールドバザール）に置き換える（ペイロードや辞書に何が入っていても置き換わる）。summary には「座標なしで確定」とは書かないこと。辞書で足りない静的属性が必要になったら、その回専用の一括取得スクリプトでまとめて取得し、saveFacilities アクション（park="${c.park}"）で辞書に保存すること。レストランについては、分類を辞書の列に書かず、その施設自身の公式レストラン詳細ページを saveSourceSnapshots（kind="restaurant_detail"、park="${c.park}"、completeness は {expectationSource: "none", expectation: "レストラン詳細ページには件数宣言が無いため完全性の期待値は導けない", result: "not_derivable"}）で全文保存してから、saveRestaurantFacts（park="${c.park}"）で根拠つきファクトとして登録すること：reservation は {type: "required"（予約必須）／"ps"（プライオリティ・シーティング対象）／"none"（予約の経路なし）／"unknown"（未確認＋理由）, evidenceKind, evidence（保存した本文からの逐語抜粋）}、mobileOrder は {type: "available"（対象）／"not_available"（対象外）／"unknown"（未確認＋理由）, 同じ形}、serviceType はページのサービスタイプの表記そのまま。肯定分類は裏づけ表記を含む抜粋（evidenceKind="excerpt"）でのみ登録でき、否定分類は原則として不在の根拠（evidenceKind="absence"、evidence は施設名を含む一節。全文に存在マーカーが無いことをサーバーが機械確認する）で登録する。読み取れない項目は "none"／"not_available" に倒さず必ず "unknown"＋理由とし、分類をラベルから推測で作らないこと（ショーダイニングエリアだけが予約必須で本体は予約なし、という二重構造の店がある。公式一覧で別エントリの施設は別々のファクトにすること）。getFacilityDictionary の restaurantFact に有効なファクトがある施設は再利用してよい。`,
+`2c. 【座標の解決】優先順位は (a) 差し替え元の引き継ぎ値、(b) 施設辞書（coordsUsable=true のもの）、(c) 不足分の一括取得スクリプト内での Nominatim 照会。座標検索に使ってよいのは OpenStreetMap の Nominatim（nominatim.openstreetmap.org）だけとし、Overpass API をはじめ他のジオコーダへ切り替えてはいけない。日本語名で見つからなければ、第10節の固定順序で再試行すること（そのままの形→検索範囲を対象パーク周辺に制限した再照会→機械的な表記ゆれ（記号の正規化・副題を落とした短縮形・英語名））。パーク名やエリア名を施設名に付け足した形は、どの段階でも照会に使ってはならない。確信を持って引けた場合だけ座標を入れ、引けない項目は座標なし（null）にする。座標を推測で作らないこと。なお座標の最終結果は、保存時にサーバー側でも表記ゆれのバリエーションで Nominatim の再照会が行われて確定し、施設自体がどうしても引けない場合はエリアの代表地点の座標でピンが表示され、その旨が検証の記録に残る。例外として、エリアがパークワイドのショー（花火など）は、施設名で引けた地点がパーク外の橋の上など無関係な場所であることがあるため使われず、座標はサーバーがパークの代表地点（シーはメディテレーニアンハーバー、ランドはワールドバザール）に置き換える（ペイロードや辞書に何が入っていても置き換わる）。summary には「座標なしで確定」とは書かないこと。辞書で足りない静的属性が必要になったら、その回専用の一括取得スクリプトでまとめて取得し、saveFacilities アクション（park="${c.park}"）で辞書に保存すること。レストランについては、分類を辞書の列に書かず、その施設自身の公式レストラン詳細ページを saveSourceSnapshots（kind="restaurant_detail"、park="${c.park}"、completeness は {expectationSource: "none", expectation: "レストラン詳細ページには件数宣言が無いため完全性の期待値は導けない", result: "not_derivable"}）で全文保存してから、saveRestaurantFacts（park="${c.park}"）で根拠つきファクトとして登録すること：reservation は {type: "required"（予約必須）／"ps"（プライオリティ・シーティング対象）／"none"（予約の経路なし）／"unknown"（未確認＋理由）, evidenceKind, evidence（保存した本文からの逐語抜粋）}、mobileOrder は {type: "available"（対象）／"not_available"（対象外）／"unknown"（未確認＋理由）, 同じ形}、serviceType はページのサービスタイプの表記そのまま。肯定分類は裏づけ表記を含む抜粋（evidenceKind="excerpt"）でのみ登録でき、否定分類は原則として不在の根拠（evidenceKind="absence"、evidence は施設名を含む一節。全文に存在マーカーが無いことをサーバーが機械確認する）で登録する。読み取れない項目は "none"／"not_available" に倒さず必ず "unknown"＋理由とし、分類をラベルから推測で作らないこと（ショーダイニングエリアだけが予約必須で本体は予約なし、という二重構造の店がある。公式一覧で別エントリの施設は別々のファクトにすること）。getFacilityDictionary の restaurantFact に有効なファクトがある施設は再利用してよい。`,
 `2d. 【検証プロセス（保存直前・必須）】プラン${slot}が完成したら、savePlanReplacement を呼ぶ前に、手順1aでこの回に取得した公式データと完成した行を突き合わせて照合すること。savePlanReplacement 側でも同じ照合が機械的に行われ、通らない場合は保存を拒否される（拒否されたら指摘を直してもう一度呼ぶこと。失敗報告はしない）。(1) DPA対象可否：passType がディズニー・プレミアアクセスの全行が、手順1aで登録した正規化ファクト（完全なビルド）で「対象（eligible）」と記録された施設でなければならない。対象外（not_eligible）や不明（unknown）の施設へのDPA設定は絶対に置かない。加えて、ファクトに適用期間（開始日／終了日）が記録された施設は、来園日時点で有効な対象かどうかもサーバーが照合する。適用開始日が来園日より後の施設には、その来園日にはDPA前提を付けないこと（スタンバイで組み直す）。どうしても入れたい施設が対象外なら、DPA前提をやめてスタンバイの推定待ち時間で組み直す。(2) DPA単価（購入した時に計上）：DPA費用は「購入した時」にだけ計上する。購入ごとに購入イベント行（kind: "purchase"、unitPriceJpy にファクト単価、purchaseCount に対象人数＝そのプランでその施設を実際に利用する人数。アトラクションは実際に乗る人数、ショーのDPA鑑賞エリアは実際にそのエリアで鑑賞する人数。全員が利用する場合のみ参加者総数。参加者全員が買う前提で総数を入れてはいけない）を1行入れ、費用内訳のDPA金額は購入イベント行ごとにファクト単価×対象人数を1回ずつ合計した額にすること。使用行では計上しない（使用行に unitPriceJpy は入れない）。購入イベント行の単価がファクトと異なる場合、対象人数が無い・1未満・参加者総数（大人＋子ども）を超える場合はクラス2で拒否される。(3) 休止・営業時間・公演時刻：各行の施設が対象日の休止一覧に無いこと、各行の時刻が営業時間内であること（開始時刻だけでなく、公式所要時間が分かる行は終了時刻＝開始時刻＋所要時間も、退園時刻と閉園時刻の早い方を超えないこと。超える行はクラス4（営業時間外・終了側）で拒否される。所要時間が分からない行は終了側では判定されない。上限ちょうどに終わる行は範囲内）、ショー/パレードの開始時刻が対象日の公式公演時刻と一致すること。(4) DPA購入順序：公式ルール「次のDPAは、前のDPAの購入から60分後、または前のパスの利用開始時刻の早い方から購入できる」で購入列が成立すること。各DPA行には購入時刻を dpaPurchaseTime として必ず入れる。(5) 照合できなかった項目は、黙って通さず verification.unverified に「◯◯：未確認（理由）」の形で入れること。`,
 SCOPE_BOUNDARY_STEP,
 `2e. 【無理ゲートと融合の原則（必須）】手順1〜1bで材料（公式施設一覧・対象日の運営／休止情報・公演時刻・正規化ファクト）が揃った時点で、起草に入る前に、変更条件と条件の要求が次の固定された無理パターンに当たらないかだけを判定すること：(1) 存在しない（必須の施設・ショーが対象パークの施設一覧に無い、または対象日に休止・公演なしであることが日付層で確定している。確認できないものは断定しない）、(2) 時間の明らかな無理（必須項目を最も緩い前提＝一番空いた側の混雑前提・待ちの下限側・トレードオフを利用者に有利な側へ全部倒して粗く合計しても、入園〜退園・営業時間の枠に収まらない）、(3) 予算の明らかな無理（最小の支出＝チケット代＋必須と明示された有料項目の費用の下限でも予算を超える）、(4) 矛盾した要求（同時刻に2か所、等）。判定は常に楽観側に倒し、トレードオフで救済できるもの（DPAを減らせば収まる、順序を変えれば両立する等）は絶対に弾かず、境界に近ければ通常の生成に進める。パターンはこの固定リストに限る。いずれかに当たれば、起草に入らず、仮の内容も保存せず、reportImpossibleRequest アクション（planSetId と slot、findings: [{category, reason: 「分類の言葉＋具体名＋客観的事実の指摘」までの1〜2文。明確な矛盾は客観的事実そのものを述べてよい（例：同じ時刻に2か所にはいられない）。具体的な改善案・処方箋は、約束の形（「○○を外せば作れます」等の反実仮想）でも提案の形（「どちらか一方を〜するなど」「〜に変更すれば」等）でも書かない}]）を呼んで終了すること（savePlanReplacement も reportPlanReplacementFailure も呼ばない）。起草で要求が全ては両立しない場合は、固定の落とす順序を使わず、要求の強さを言われ方（「絶対」「必ず」の明示・繰り返し・順序指定・詳細さが強い／一度だけの軽い言及は弱い）から読んで、その利用者の価値観に沿う形に融合すること。取り込めなかった要求は、黙って落とさず、理由つきで summary に列挙すること。どう調整しても両立しないことが明確になった場合も、仮の内容を保存せず reportImpossibleRequest で報告すること。`,
@@ -6240,6 +6399,7 @@ currentLines,
 `   - 削除: 指示で挙がったサイトをリストから外す。`,
 `   - 再検索: 待ち時間の集計サイトを新たに検索し、候補を評価する（施設ごとの平均・最大・最小や曜日別の傾向が取れるか、更新が続いているか、実際にページが開けるか）。現在の登録のうち、開けなくなっている・更新が止まっているサイトは外し、良い候補があれば差し替え・追加する。再検索のついでに、残すサイトも実際に開いて生きているか確認する。`,
 `   - 対象パーク（ランド/シー/両方）を間違えないこと。同じサイトでもパーク別ページがある場合は、パークごとに1件として扱ってよい。`,
+`   - 【残るサイトの再確認（追加・削除のとき必須）】追加・削除の作業では最後に、更新後に残る登録サイトを全て実際に開いて生きているか確認すること。確認できたサイトは checkedToday=true で報告する（残りのサイトの最終確認日が今回の日付に更新されるのが、この作業の決まりである）。開いて確認できなかったサイトは checkedToday=false とし、その旨を summary に書くこと。`,
 `   - 【取得方法の確認（必須）】各サイトについて、そのサイトのデータがどの方法で取れるかも確認して記録すること。まずスクリプト的な静的取得（HTTPでページを取得して、集計データがそのまま読めるか）を試し、読めれば fetchMethod="script"。静的取得では読めず（JavaScript描画や内部ブラウザが必要で）、ブラウザ表示で開いて初めて読める場合は fetchMethod="browser"。どちらでも読めないサイトは、登録に残す場合でも fetchMethod="failed" とする。この記録は次回以降の取得方法のノウハウになる。`,
 `2. 更新後のリスト全体を、保存アクション（saveWaitTimeSources、requestId=${requestId}）に渡す。sources は更新後の全件で、各 {name, url, park（land/sea/both）, provides（何が取れるか）, checkedToday（今回この作業で実際に開いて確認できたら true）, fetchMethod（"script"|"browser"|"failed"。今回確認しなかったサイトは前回の記録を引き継ぐので null でよい）} を入れる。summary には、ユーザーへの完了報告（何を追加/削除/差し替えたか、確認できなかったものがあればその理由）を簡潔な日本語で入れること（この文がそのままチャットに表示される）。`,
 `3. サイトが開けない等で作業ができない場合は、失敗報告アクション（reportWaitTimeSourcesFailure、requestId=${requestId}）で理由を伝えること。どちらのアクションも呼ばずに終了しないこと。開いて確認していないサイトを「確認済み」にしないこと。URLを推測で作らないこと。`,
@@ -7646,7 +7806,7 @@ async function buildVerificationPackageText(
   }
   if (gate.build && gate.summary && !gate.summary.complete) {
     disclosures.push(
-      `ファクトビルド #${gate.build.id} は不完全です（母集合${gate.summary.universeCount}施設のうち${gate.missingNames.length}施設にファクトがありません：${gate.missingNames.slice(0, 10).join("、")}${gate.missingNames.length > 10 ? " ほか" : ""}）`,
+      `ファクトビルド #${gate.build.id} は不完全です（母集合${gate.summary.universeCount}施設のうち、${incompleteBuildDetail(gate)}）`,
     );
   }
   if (condParsed.missing.length > 0) {
@@ -8629,6 +8789,40 @@ const itemRows = await db
 .where(eq(schema.planItems.planId, plan.id))
 .orderBy(asc(schema.planItems.sortOrder));
 sections.push(`プラン${plan.slot}「${plan.title}」:`);
+// The plan's saved cost figures belong to its actual contents:
+// a question about the total cost or its breakdown （プランAの
+// 合計費用はいくらですか？) must be answerable from THIS data —
+// without it the chat AI could only say it could not confirm
+// (T08). Amounts are the stored ones, never recomputed here.
+if (plan.estimatedCostJpy != null) {
+let breakdownText = "";
+if (plan.costBreakdownJson) {
+try {
+const parsed: unknown = JSON.parse(plan.costBreakdownJson);
+if (Array.isArray(parsed)) {
+const lines = parsed
+.filter(
+(l): l is { label: string; amountJpy: number | null; note?: string | null } =>
+typeof l === "object" &&
+l !== null &&
+typeof (l as { label?: unknown }).label === "string" &&
+(typeof (l as { amountJpy?: unknown }).amountJpy === "number" ||
+(l as { amountJpy?: unknown }).amountJpy === null),
+)
+.map(
+(l) =>
+`${l.label} ${l.amountJpy != null ? `${l.amountJpy.toLocaleString("ja-JP")}円` : "金額なし"}${l.note ? `（${l.note}）` : ""}`,
+);
+if (lines.length > 0) breakdownText = `（内訳: ${lines.join("、")}）`;
+}
+} catch {
+breakdownText = "";
+}
+}
+sections.push(
+`- 費用合計: ${plan.estimatedCostJpy.toLocaleString("ja-JP")}円${breakdownText}`,
+);
+}
 for (const it of itemRows) {
 sections.push(
 `- ${it.timeLabel ?? "時刻なし"} ${it.name}（${it.kind}${it.area ? `、${it.area}` : ""}）${it.estWaitMin != null ? ` 推定待ち約${it.estWaitMin}分` : ""}${it.travelMin != null ? ` 前の項目からの移動約${it.travelMin}分（サーバー計算）` : ""}${it.unconfirmedReason ? ` 未確定（${it.unconfirmedReason}）` : ""}${it.note ? ` ${it.note}` : ""}`,
@@ -8782,7 +8976,7 @@ windowText,
 ``,
 `【当日の対応ルール（厳守）】`,
 `・「当日は対応できません」「ご自身で調整をお願いします」のような、当日対応を断る言い方は絶対にしないでください。このアプリは当日のリスケジュールに対応します。`,
-`・ユーザーが当日の事実（例：「トイ・ストーリー・マニア！のDPAが買えなかった」「もう◯◯に乗った」「◯◯はやめた」）を報告したら、それは条件変更の報告として受け止めてください。まず報告を受け止め、その事実が現在のプランにどう影響するか（その項目をどう扱う必要があるか）を短く伝えてください。文脈上、残りの時間の組み直し（リスケジュール）を求めていると判断できる場合は、generationKind を "reschedule" として wantsPlanGeneration を true にし、開始してよい。報告を受け止めるだけが求められていると判断できる場合は開始せず、リスケジュールを提案してください（例：「その場合は◯◯をスタンバイで組み直すか、別の項目に替えられます。リスケジュールしますか？」）。`,
+`・ユーザーが当日の事実（例：「トイ・ストーリー・マニア！のDPAが買えなかった」「もう◯◯に乗った」「◯◯はやめた」）を報告したら、まず報告を受け止め、その事実が現在のプランにどう影響するか（その項目をどう扱う必要があるか）を短く伝えてください。事実の報告だけのメッセージ（組み直しを求める言葉が文面にも文脈にも無いもの）では、絶対に開始しないでください（仕様書第12.1節の原則：当日の事実の報告だけのメッセージでは作成を始めない）。開始せず、リスケジュールを提案してください（例：「その場合は◯◯をスタンバイで組み直すか、別の項目に替えられます。リスケジュールしますか？」）。開始するのは、メッセージ自体が組み直しを求めている場合（「リスケジュールして」「組み直して」等の依頼が文面にある場合）と、あなたがリスケジュールを提案した直後にユーザーがそれを受け入れた場合だけです。「買えなかった」「取れなかった」「乗った」「やめた」等の事実の言明だけを、組み直しの依頼と読み替えてはいけません。`,
 `・リスケジュールを開始する場合は、報告された事実をもとに残りの時間を組み直すことを伝えてください。`,
 `・DPAの販売状況（販売中か、売り切れたか、残りがあるか）はこのアプリには分かりません。ユーザーの報告だけが情報源です。ユーザーの報告にない販売状況を断定する言い方（「◯◯のDPAは売り切れています」「まだ買えます」など）、アプリが販売状況を知っているかのような言い方は絶対にしないでください。`,
 ``,
@@ -10254,6 +10448,17 @@ errors.push(
 }
 factKeys.set(k, f.name);
 }
+// Registration validation (5) (spec §6.2.1): a fact's facility
+// must belong to the mother set — a fact for a facility outside
+// the universe read from the facility_list snapshot cannot be
+// registered at all.
+for (const f of args.facts) {
+if (!universeKeys.has(facilityNameKey(f.name))) {
+errors.push(
+`「${f.name}」：母集合（施設全一覧）に含まれていない施設のファクトは登録できません。ファクトは、母集合スナップショットから読み取った施設についてだけ登録してください`,
+);
+}
+}
 for (const f of args.facts) {
 const snap = snapById.get(f.snapshotId);
 if (!snap) {
@@ -10580,6 +10785,10 @@ visitDate: z.string().nullable(),
 summary: factSummaryShape.nullable(),
 missing: z.array(z.string()),
 facts: z.array(dpaFactShape),
+// The invalidation record (spec: an invalidated build's standing
+// and the record of its invalidation stay readable here).
+invalidatedAt: z.string().nullable(),
+invalidatedReason: z.string().nullable(),
 }),
 async handler(
 ctx,
@@ -10591,6 +10800,8 @@ visitDate: string | null;
 summary: z.infer<typeof factSummaryShape> | null;
 missing: string[];
 facts: z.infer<typeof dpaFactShape>[];
+invalidatedAt: string | null;
+invalidatedReason: string | null;
 }> {
 const db = ctx.db<typeof schema>();
 const rows = await db
@@ -10607,6 +10818,8 @@ visitDate: null,
 summary: null,
 missing: [],
 facts: [],
+invalidatedAt: null,
+invalidatedReason: null,
 };
 }
 const gate = await loadDpaFactGate(ctx, build.id, build.park);
@@ -10617,6 +10830,10 @@ visitDate: build.visitDate,
 summary: gate.summary,
 missing: gate.missingNames,
 facts: gate.displayFacts,
+invalidatedAt: build.invalidatedAt
+? build.invalidatedAt.toISOString()
+: null,
+invalidatedReason: build.invalidatedReason ?? null,
 };
 },
 }),
@@ -12397,9 +12614,14 @@ phases: args.metrics.phases?? [],
 progressUpdatedAt: new Date(),
 notes: finalNotes,
 verificationJson: JSON.stringify(verificationRecord),
-// A fresh set's last-verified date IS this verification's
-// checkedAt; bulk re-verifications advance it from here.
-lastVerifiedAt: checkedAtToDate(verificationRecord.checkedAt) ?? new Date(),
+// A fresh set's last-verified instant IS the moment this
+// save-time verification passed — the actual clock time of
+// this save, NOT a date derived from the record's checkedAt
+// (which is a fetch DATE only; turning it into noon of that
+// day made lastVerifiedAt a fixed value that matched no real
+// verification instant — T96). Bulk re-verifications advance
+// it from here.
+lastVerifiedAt: new Date(),
 // This run's DPA page material, stored verbatim as the run's raw
 // record. It judges nothing — the DPA gate ran on the normalized
 // facts of the build named here.
@@ -13218,6 +13440,22 @@ violations.push(
 `プラン${slot}: 費用合計（${plan.estimatedCostJpy.toLocaleString("ja-JP")}円）が、条件の予算（${snapshotBudgetJpy.toLocaleString("ja-JP")}円）を超えているのに、予算超過の開示が提出に含まれていません（予算対応の不一致・クラス13）。予算超過を開示する文面を budgetDisclosure として渡し、同じ開示をプランの説明（summary）にも含めて再保存してください。予算内に収まる場合は、合計が予算以下になるよう組み直してください。`,
 );
 }
+
+// Class 12 — the ticket line of the breakdown must be costed for
+// THIS set's snapshot party (spec §9.2), same rule as savePlanSet.
+violations.push(
+...ticketLinePartyViolations(
+slot,
+plan.costBreakdown,
+set.setType === "same_day" && set.sameDayAdults != null
+? { adults: set.sameDayAdults, children: set.sameDayChildren ?? 0 }
+: (snapshotParty ??
+(formParty
+? { adults: formParty.adults, children: formParty.children }
+: null)),
+args.ticketPrices,
+),
+);
 if (violations.length > 0) {
 throw new Error(
 `保存できませんでした。次の問題を直して、もう一度 savePlanReplacement を呼んでください（失敗報告はしないこと）:\n- ${violations.slice(0, 10).join("\n- ")}`,
@@ -13638,7 +13876,7 @@ slot === "A"
 progressA: "done" as const,
 progressUpdatedAt: new Date(),
 verificationJson: JSON.stringify(verificationRecord),
-lastVerifiedAt: checkedAtToDate(verificationRecord.checkedAt) ?? new Date(),
+lastVerifiedAt: new Date(),
 factBuildId: args.factBuildId ?? set.factBuildId,
 pendingOpsJson: completedOpsJson,
 }
@@ -13647,7 +13885,7 @@ pendingOpsJson: completedOpsJson,
 progressB: "done" as const,
 progressUpdatedAt: new Date(),
 verificationJson: JSON.stringify(verificationRecord),
-lastVerifiedAt: checkedAtToDate(verificationRecord.checkedAt) ?? new Date(),
+lastVerifiedAt: new Date(),
 factBuildId: args.factBuildId ?? set.factBuildId,
 pendingOpsJson: completedOpsJson,
 }
@@ -13655,7 +13893,7 @@ pendingOpsJson: completedOpsJson,
 progressC: "done" as const,
 progressUpdatedAt: new Date(),
 verificationJson: JSON.stringify(verificationRecord),
-lastVerifiedAt: checkedAtToDate(verificationRecord.checkedAt) ?? new Date(),
+lastVerifiedAt: new Date(),
 factBuildId: args.factBuildId ?? set.factBuildId,
 pendingOpsJson: completedOpsJson,
 },
@@ -15560,7 +15798,7 @@ return { ok: true};
 
 resetUserData: defineAction({
 description:
-"Deletes ALL user data and returns the app to its initial state (spec §24): the AI chat log (messages), the プラン作成 conditions row, every plan set with its plans and schedule items, the facility dictionary, the area travel-time matrix, the normalized-source layer (source snapshots, normalized facts, fact builds), research requests, and the pending-request trackers tied to deleted data (verification requests, wait-time-source update requests). What stays: the four fixed tabs (they are app structure, not data), the wait-time reference sites registered by the build-time survey (wait_time_sources rows), the saved announcement (announcement — distribution-channel state that doubles as the read record, spec §22.1), and the app constants (e.g. SHARE_NOTE_URL, ANNOUNCE_URL). Photo blobs belonging to deleted rows are left unreferenced in blob storage; nothing reads them once their rows are gone.",
+"Deletes ALL user data and returns the app to its initial state (spec §24): the AI chat log (messages), the プラン作成 conditions row, every plan set with its plans and schedule items, the facility dictionary (restored to the §24 seed: the 75 verified coordinate entries of data/facility-coordinates.json, all other static attributes empty), the area travel-time matrix, the normalized-source layer (source snapshots, normalized facts, fact builds, restaurant facts), research requests, and the pending-request trackers tied to deleted data (verification requests, wait-time-source update requests). What stays: the four fixed tabs (they are app structure, not data), the wait-time reference sites registered by the build-time survey (wait_time_sources rows), the saved announcement (announcement — distribution-channel state that doubles as the read record, spec §22.1), and the app constants (e.g. SHARE_NOTE_URL, ANNOUNCE_URL). Photo blobs belonging to deleted rows are left unreferenced in blob storage; nothing reads them once their rows are gone.",
 request: z.object({}),
 response: z.object({ ok: z.literal(true) }),
 async handler(ctx): Promise<{ ok: true }> {
@@ -15573,10 +15811,28 @@ await db.delete(schema.planItems);
 await db.delete(schema.verificationRequests);
 await db.delete(schema.plans);
 await db.delete(schema.planSets);
+await db.delete(schema.restaurantFacts);
 await db.delete(schema.normalizedFacts);
 await db.delete(schema.factBuilds);
 await db.delete(schema.sourceSnapshots);
 await db.delete(schema.facilities);
+// §24 initial state: the dictionary is not empty after a reset —
+// it holds exactly the distributed coordinate seed (75 entries),
+// with every other static attribute unset.
+const seedStamp = new Date(FACILITY_SEED_STAMP_MS);
+await db.insert(schema.facilities).values(
+FACILITY_SEED.map((f) => ({
+park: f.park,
+nameKey: f.nameKey,
+name: f.name,
+area: f.area,
+lat: f.lat,
+lng: f.lng,
+coordsFetchedAt: seedStamp,
+createdAt: seedStamp,
+updatedAt: seedStamp,
+})),
+);
 await db.delete(schema.areaTravelTimes);
 await db.delete(schema.researchRequests);
 await db.delete(schema.waitTimeSourceRequests);
