@@ -1271,73 +1271,6 @@ return name
 .toLowerCase();
 }
 
-// Initial registration for the 待ち時間参考サイト list: the result of
-// this copy's build-time survey (2026-11-12). Each URL was fetched and
-// confirmed reachable (HTTP 200, real aggregate data) before being
-// registered here. This is NOT a bundled dataset and NOT a permanent
-// fixture: the list lives in the DB, the AI maintains it on chat
-// instruction (add / remove / re-search), and plan generation cites
-// whichever sites are registered at that moment. Seeded once, only
-// while the table is completely empty, so AI/user-driven changes are
-// never overwritten.
-const INITIAL_WAIT_TIME_SOURCES: {
-name: string;
-url: string;
-park: "land" | "sea" | "both";
-provides: string;
-}[] = [
-{
-name: "urtrip（ランド）",
-url: "https://urtrip.jp/tdl-attraction-waitingtime-data/",
-park: "land",
-provides:
-"アトラクション別の過去データ分析：平均・最大・最小の待ち時間と、日ごとの平均待ち時間の推移",
-},
-{
-name: "urtrip（シー）",
-url: "https://urtrip.jp/tds-attraction-waitingtime-data/",
-park: "sea",
-provides:
-"アトラクション別の過去データ分析：平均・最大・最小の待ち時間と、日ごとの平均待ち時間の推移",
-},
-{
-name: "テマパ！",
-url: "https://www.temapa.jp/park/tdr/facility/258/",
-park: "both",
-provides:
-"施設ごとの現在の待ち時間と、平均・最大の待ち時間（リンク先は施設別ページの一例）",
-},
-{
-name: "disneyreal（ファンタジースプリングス）",
-url: "https://disneyreal.asumirai.info/guide/fantasysprings.html",
-park: "sea",
-provides:
-"ファンタジースプリングスの待ち時間統計：平均・中央値・最小・最大",
-},
-];
-
-async function ensureWaitTimeSources(ctx: Ctx): Promise<void> {
-const db = ctx.db<typeof schema>();
-const existing = await db
-.select({ id: schema.waitTimeSources.id})
-.from(schema.waitTimeSources)
-.limit(1);
-if (existing.length > 0) return;
-const now = new Date();
-for (const s of INITIAL_WAIT_TIME_SOURCES) {
-await db.insert(schema.waitTimeSources).values({
-name: s.name,
-url: s.url,
-park: s.park,
-provides: s.provides,
-// The build-time survey read these pages with a plain static fetch
-// (curl), so the recorded acquisition method starts as "script".
-fetchMethod: "script",
-lastCheckedAt: now,
-});
-}
-}
-
 async function loadWaitTimeSources(
 ctx: Ctx,
 ): Promise<z.infer<typeof waitTimeSourceShape>[]> {
@@ -4984,7 +4917,6 @@ retrySpawn?: boolean;
 ): Promise<boolean> {
 const db = ctx.db<typeof schema>();
 const { prevSet, dayOf, changeRequest, title } = opts;
-await ensureWaitTimeSources(ctx);
 const waitRefs = await loadWaitTimeSources(ctx);
 const areaMatrix = await loadAreaMatrix(ctx, c.park);
 const areaMatrixLines = areaMatrixLinesFor(areaMatrix);
@@ -5260,7 +5192,6 @@ title: string,
 retrySpawn: boolean = false,
 ): Promise<boolean> {
 const db = ctx.db<typeof schema>();
-await ensureWaitTimeSources(ctx);
 const waitRefs = await loadWaitTimeSources(ctx);
 const areaMatrixLines = areaMatrixLinesFor(
 await loadAreaMatrix(ctx, sd.park),
@@ -5638,7 +5569,6 @@ slot === "A"
 : { progressC: "generating" as const, progressUpdatedAt: opStartedAt, pendingOpsJson},
 )
 .where(eq(schema.planSets.id, set.id));
-await ensureWaitTimeSources(ctx);
 const waitRefs = await loadWaitTimeSources(ctx);
 const areaMatrixLines = areaMatrixLinesFor(
 await loadAreaMatrix(ctx, set.park),
@@ -6396,7 +6326,6 @@ ctx: Ctx,
 instruction: string,
 ): Promise<{ requestId: number; ok: boolean}> {
 const db = ctx.db<typeof schema>();
-await ensureWaitTimeSources(ctx);
 const inserted = await db
 .insert(schema.waitTimeSourceRequests)
 .values({ instruction})
@@ -7961,7 +7890,6 @@ researchPending = true;
 // the first time the list is read, and run the same dead-task guard as
 // research — a pending update past the stale window is failed once and
 // reported in chat instead of leaving the indicator on forever.
-await ensureWaitTimeSources(ctx);
 const pendingWaitReqs = await db
 .select()
 .from(schema.waitTimeSourceRequests)
@@ -8848,7 +8776,7 @@ planContentsText = blocks.join("\n\n");
 }
 
 // Currently registered wait-time reference sites, so instructions like
-// 「disneyrealを削除して」 can be matched against the real list.
+// 「○○を削除して」 can be matched against the real list.
 const waitSourcesNow = await loadWaitTimeSources(ctx);
 const waitSourcesText =
 waitSourcesNow.length > 0
@@ -8951,6 +8879,7 @@ windowText,
 `・開始するかどうかは、文型や特定の言い回しの有無ではなく、会話の文脈と開いているタブの情報から判断してください。ユーザーがプランの作成・変更を求めていると文脈から判断できる場合は、wantsPlanGeneration を true にして開始してよい。言い回しが簡潔・口語的でも（例：「作り直して」「やっぱりBにセンター入れて」「Bだけ直して」）、文脈が意図を示していれば開始の意図として扱うこと。意図を深読みして開始してしまう側の誤りは許容されます（ユーザーの決定です）。`,
 `・要求が無理に見える場合（対象パークに無い施設の必須指定、全アトラクション制覇のような時間的に収まらない指定、同時刻に2か所を指定するような矛盾した指定、予算が明らかに足りない指定など）でも、作成・作り直し・差し替えを求められている文脈なら、wantsPlanGeneration は true のままにしてください。無理かどうかの判定は、開始判断とは別の段であるアプリ側の「無理ゲート」が材料と照らして行い、無理と判定された場合の拒否の文面もアプリ側が固定形式（謝罪＋原因の分類＋案内文）で返します。あなた自身が「できません」と断る返信を書いて開始を見送ったり、条件を緩める代案を提示して開始を保留したりしてはいけません（開始したかどうかは実際の開始結果で決まります）。`,
 `・逆に、質問への回答だけが求められている場合、制度や施設の事実確認（調査）が求められている場合、当日の事実の報告を受け止めるだけの場合（文脈上、組み直しの依頼と読めない場合）は開始しないこと。迷った場合は、直前のやり取り全体（自分が何を案内し、ユーザーがそれにどう応じたか）から判断すること。自分が「『作り直して』とお伝えください」のように進め方を案内した直後にユーザーがそれに沿って返したら、それは開始の意図です。`,
+`・費用を下げる方向だけの曖昧な変更指示（例：「もっと安くして」「安くして」「もっと安いプランにして」）で、新しい予算額や目標金額（「予算を5万円にして」「あと1万円安く」等）が文面にも文脈にも示されていない場合は、開始しないでください。予算は条件の値であり、新しい値が決まらなければ変更のしようがありません。同じ予算のまま作り直しても「安く」はならないので、開始せず、返信で目標の金額（新しい予算の総額）を聞き返してください（例：「いくらくらいまでに抑えたいですか？新しい予算の金額を教えてください」）。この場合は wantsPlanGeneration は false、conditionChanges は null です。逆に、新しい金額が示されている場合は通常どおり条件変更として開始してください（conditionChanges.budgetJpy に新しい総額を入れる）。この聞き返しは費用の変更だけに適用されます：施設の追加・削除のような内容の変更は、従来どおり文脈から深読みして開始してよい。`,
 `・開始する場合は generationKind に種別を入れてください：新しいプランの作成は "new"、規準プランの作り直し（セット全体）は "rebuild"、当日の事実をもとに残りの時間を組み直す場合は "reschedule"。開始しない場合は null。特定のプランだけへの変更は generationKind を "rebuild" とし、対象と内容を planChange に入れてください（部分差し替えとして実行されます）。`,
 `・"rebuild" でも実際には元のプランは上書きされず、元のプランをもとにした新しいプランが別のタブに作られます（部分差し替えの場合は、同じセット内でそのプランだけが差し替わります）。返信でも実際の動作どおりに伝えてください（「作り直します」とだけ言うと上書きされるように聞こえるので禁止）。同じパーク・同じ日付のプランが既にあるだけでは作り直しにはなりません——文脈が単なる新規作成なら "new" として扱い、「作り直し」とは言わないでください。プラン作成タブのボタンから開始された作成も、常に新規作成です。作成を求められていて日付が未定なら true にせず、日付を聞いてください。`,
 ``,

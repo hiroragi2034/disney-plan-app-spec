@@ -95,7 +95,7 @@ export const messages = sqliteTable("messages", {
 // material, kept strictly separate from official-site sources.
 export const waitTimeSources = sqliteTable("wait_time_sources", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  // Display name of the site / page, e.g. "urtrip（ランド）".
+  // Display name of the site / page.
   name: text("name").notNull(),
   url: text("url").notNull(),
   // Which park the page covers; "both" when one page covers both parks.
