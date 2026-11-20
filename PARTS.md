@@ -22,11 +22,11 @@
 | パーツ | リポジトリ内パス | 出所 | バイト数 |
 |---|---|---|---|
 | 地図層（仮想地図ライブラリ） | `parts/client/src/map_helpers.mjs` | `client/src/map_helpers.mjs` | 31,120 |
-| クライアント全体 | `parts/client/src/App.tsx` | `client/src/App.tsx` | 263,655 |
+| クライアント全体 | `parts/client/src/App.tsx` | `client/src/App.tsx` | 263,554 |
 | PDF生成 | `parts/client/src/pdf.ts` | `client/src/pdf.ts` | 68,365 |
 | プラン集計 | `parts/client/src/plan_metrics.ts` | `client/src/plan_metrics.ts` | 10,301 |
 | クライアント配管・スタイル | `parts/client/src/{api.ts, main.tsx, theme.css, globals.d.ts}`、`parts/client/{index.html, build.mjs}` | 同名パス | 計9,588 |
-| サーバー全体（決定的ロジック・タスク管理クラス・取得計画・実行ログを含む） | `parts/server/src/actions.ts` | `server/src/actions.ts` | 1,040,006 |
+| サーバー全体（決定的ロジック・タスク管理クラス・取得計画・実行ログを含む） | `parts/server/src/actions.ts` | `server/src/actions.ts` | 1,044,044 |
 | 辞書の種（リセット時の初期状態の復元） | `parts/server/src/facility_seed.ts` | `server/src/facility_seed.ts` | 16,280 |
 | データモデル | `parts/server/src/schema.ts` | `server/src/schema.ts` | 67,101 |
 | スキーマ移行（SQL 47本＋ジャーナル） | `parts/drizzle/` | `drizzle/` | 計84,145 |
@@ -57,6 +57,8 @@
 記録BT（2026-11-21）での更新：再構築検証4で見つかったパーツの不具合2件を直した。待ち時間参考サイトの初期登録の定数（名称とURLを固定したもの）と、その登録処理を取り除いた（登録は構築時調査の結果としてのみ行われる）。移行0018の名称からもサイト名を取り除いた。チャットの開始判断の指示文に、金額の示されていない費用変更への聞き返しを追加した。
 
 記録BV（2026-11-21）での更新：パーツの作り方そのものを変えた（所有者の指示）。従来のパーツは2026-11-18時点の写しに修正を継ぎ足していたため、本家とのずれが繰り返し再構築の不具合になった。今後は本家の現在のソースから、種別の定義に従って毎回生成する。あわせて、待ち時間参考サイトの固定登録の定数は本家側からも取り除いた（テストT64の恒久対策）。
+
+記録BZ（2026-11-21）での更新：再構築検証6で見つかった不具合を本家側で直し、パーツを再生成した。内容は記録BZのとおり（規準セットの解決の3件制限の撤廃、部分差し替えで lastVerifiedAt を書かないこと、完了通知の案内文の判定を状態によるものへ変更、当日リスケでの「最初の10分」行の引き継ぎ手順、初回生成での手順2dの必須化、検証パッケージの所要時間表示の出所区別）。
 
 drizzle 0020 は、エリア間移動マトリクスの実データを登録する移行であり、
 スキーマだけでなく確定データも含んでいる。そのまま含めた。
