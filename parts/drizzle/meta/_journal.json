@@ -239,6 +239,97 @@
       "when": 1794890641283,
       "tag": "0034_add_generation_escape_state",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1794979632974,
+      "tag": "0035_seed_facility_dictionary_from_distribution_data",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1795052089771,
+      "tag": "0036_add_acquisition_plan_layer",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1795065951709,
+      "tag": "0037_acquisition_plan_v3_sitemap_tree_and_storehouse",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1795066836660,
+      "tag": "0038_add_run_logs",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1795101113252,
+      "tag": "0039_add_dpa_debug_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1795119980251,
+      "tag": "0040_add_debug2_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1795121061846,
+      "tag": "0041_add_debug2_step_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1795124231329,
+      "tag": "0042_add_debug3_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1795125380653,
+      "tag": "0043_add_debug4_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1795126979104,
+      "tag": "0044_add_debug5_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1795133325702,
+      "tag": "0045_add_task_manager_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1795140353560,
+      "tag": "0046_task_manager_production_kinds",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1795145464304,
+      "tag": "0047_task_manager_kinds_15_17_and_dialog_notices",
+      "breakpoints": true
     }
   ]
 }

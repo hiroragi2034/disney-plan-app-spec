@@ -206,14 +206,15 @@ export function formatWalkDistance(m: number): string {
 // the premise line names the cap; the factors actually applied
 // per facility live in the verification record). Owner-set values
 // (2026-11-14): the level's value is the cap for the most
-// crowd-sensitive headline attractions; 4 is interpolated, 5 is
-// the owner's fixed value (Soaring posted 340 minutes on
+// crowd-sensitive headline attractions; 4 was set to 2.0 by the
+// owner on 2026-11-19 from measured level-4/level-3 wait ratios,
+// 5 is the owner's fixed value (Soaring posted 340 minutes on
 // 2026-01-06).
 export const CROWD_FACTOR_CAPS: Record<number, number> = {
   1: 0.8,
   2: 0.9,
   3: 1.0,
-  4: 2.5,
+  4: 2.0,
   5: 5.0,
 };
 
@@ -221,7 +222,7 @@ export function crowdFactorCap(level: number): number {
   return CROWD_FACTOR_CAPS[level] ?? 1.0;
 }
 
-// "×2.5" / "×1.0" style factor label.
+// "×2.0" / "×1.0" style factor label.
 export function crowdFactorLabel(factor: number): string {
   return `×${Number.isInteger(factor) ? factor.toFixed(1) : String(factor)}`;
 }

@@ -29,11 +29,11 @@
 
 import { api, type ApiResponse } from "./api";
 import {
-  TIGHT_LEG_CAUTION_TEXT,
-  crowdFactorLabel,
-  crowdScenarioPremiseText,
-  formatWalkDistance,
-  tightLegTargets,
+TIGHT_LEG_CAUTION_TEXT,
+crowdFactorLabel,
+crowdScenarioPremiseText,
+formatWalkDistance,
+tightLegTargets,
 } from "./plan_metrics";
 
 export type PlanPdfData = ApiResponse<typeof api, "getPlanPdfData">;

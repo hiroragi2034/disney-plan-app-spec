@@ -1,13 +1,21 @@
 # parts/ — settled implementation (integrate, do not re-derive)
 
-These files are a byte-identical copy of the working implementation of the
-original app 「我が家のディズニー計画」, exported 2026-11-18. They are the
-settled parts of the product: the parts whose behaviour was designed, built
-and verified once, and which a rebuilt copy should INTEGRATE as-is instead
-of re-implementing from the prose of SPEC.md. Where the spec's prose and
-this code disagree about a settled part's behaviour, the code is what the
-original actually does — flag the disagreement rather than silently
-rewriting the part.
+These files are the production build of the working implementation of
+the original app 「我が家のディズニー計画」, generated on 2026-11-21 from
+the original's current source (its development build) by applying the
+production-variant definition of distribution record BV: the
+development-only parts (the debug tab and its actions and tables, the
+task-manager tab screen, and the debug-run door inside the chat action)
+are removed, the debug-only migrations are emptied in place so the chain
+keeps its numbering, and migration 0018 registers no wait-time sources.
+Everything else is the original's code byte for byte — including the
+task-management class (inside actions.ts, wired), the acquisition plan
+layer, and the run logging. They are the settled parts of the product:
+the parts whose behaviour was designed, built and verified once, and
+which a rebuilt copy should INTEGRATE as-is instead of re-implementing
+from the prose of SPEC.md. Where the spec's prose and this code disagree
+about a settled part's behaviour, the code is what the original actually
+does — flag the disagreement rather than silently rewriting the part.
 
 Layout mirrors the original project:
 
@@ -29,10 +37,12 @@ Layout mirrors the original project:
 - `server/src/actions.ts` — all server actions in one file, including the
   deterministic logic: save-time gates, travel-time computation, the §10
   coordinate ladder and save-time re-resolution, the parkwide
-  representative-point replacement, the normalized-fact layer. Copy whole;
-  do not split.
+  representative-point replacement, the normalized-fact layer, the
+  task-management class, the acquisition plan layer and the run logging.
+  Copy whole; do not split.
 - `server/src/schema.ts` — the data model. `drizzle/` — its SQL migrations
-  (the schema as actually evolved, 0001–0034).
+  (the schema as actually evolved, 0001–0047; 0018 and 0039–0044 are
+  emptied no-ops in this production build, see above).
 - `package.json` — the dependency manifest (`@hatch/space-sdk` is supplied
   by the platform; the rest are ordinary packages).
 

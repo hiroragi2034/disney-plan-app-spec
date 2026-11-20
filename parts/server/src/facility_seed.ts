@@ -1,8 +1,8 @@
 // The facility dictionary's initial state (spec §24): the verified
 // coordinate seed distributed as data/facility-coordinates.json
 // (2026-11-18 full check: 71 facilities with coordinates + 4 show
-// venues, 75 entries), loaded into the dictionary when
-// the app is built. resetUserData restores exactly these rows so
+// venues, 75 entries), the same rows migration 0035 inserted when
+// this app was built. resetUserData restores exactly these rows so
 // the dictionary returns to the §24 initial state instead of ending
 // up empty. Coordinates are the one data kind the spec explicitly
 // allows bundling (§0 exception (1) / §10: facilities do not move);

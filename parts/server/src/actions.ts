@@ -16,7 +16,8 @@ z,
 type ActionsModule,
 type Ctx,
 } from "@hatch/space-sdk";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, notInArray } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import * as schema from "./schema";
 import { FACILITY_SEED, FACILITY_SEED_STAMP_MS } from "./facility_seed";
 
@@ -79,6 +80,29 @@ walkingSpeed: walkingSpeedEnum,
 });
 
 type Conditions = z.infer<typeof conditionsShape>;
+
+// The structured condition CHANGES a chat judgement returns (see
+// 【条件の変更点の受け渡しルール】 in sendMessage's prompt): only the
+// fields whose VALUES the user's instruction changes, each with its
+// new value; every other field stays null. Returned on every
+// judgement kind — a stated value change must never be dropped into
+// a bare 「作り直し」 judgement (2026-11-20 incident: 「退園を19:30に
+// して」 was judged a rebuild and the 19:30 reached nothing, so the
+// rebuild silently ran on the original 19:00 exit time).
+const conditionChangesShape = z.object({
+  park: parkEnum.nullable(),
+  visitDate: z.string().max(20).nullable(),
+  entryTime: z.string().max(10).nullable(),
+  exitTime: z.string().max(10).nullable(),
+  budgetJpy: z.number().int().min(0).nullable(),
+  adults: z.number().int().min(0).max(20).nullable(),
+  children: z.number().int().min(0).max(20).nullable(),
+  childrenAges: z.string().max(300).nullable(),
+  priority: z.string().max(2000).nullable(),
+  walkingSpeed: walkingSpeedEnum.nullable(),
+});
+
+type ConditionChanges = z.infer<typeof conditionChangesShape>;
 
 const planItemShape = z.object({
 id: z.number(),
@@ -703,6 +727,16 @@ A: z.string().nullable(),
 B: z.string().nullable(),
 C: z.string().nullable(),
 }),
+// Per-slot failure text of a partial operation the task manager
+// ended after exhausting its attempts （裏タスク管理クラス）: the
+// slot stands at 失敗 (not 作成中） with this text, its request
+// still recorded so リトライ re-runs it. Null for slots with no
+// such failure.
+partialOpFailures: z.object({
+A: z.string().nullable(),
+B: z.string().nullable(),
+C: z.string().nullable(),
+}),
 error: z.string().nullable(),
 // Pre-completion verification record (see verificationShape); null
 // for plan sets saved before the verification step existed.
@@ -837,6 +871,18 @@ eveVerification: z
 planSetId: z.number(),
 title: z.string(),
 visitDate: z.string(),
+})
+.nullable(),
+// A task-manager dialog notice awaiting display: raised when one
+// of the auxiliary production processings (wait-time site list
+// update / image fetch / restaurant fact correction) exhausted
+// its attempts. Carries the one common congestion text verbatim;
+// the client shows it as a dialog once and marks it shown via
+// markMgrDialogShown. Null when no notice is waiting.
+mgrDialogNotice: z
+.object({
+id: z.number(),
+text: z.string(),
 })
 .nullable(),
 });
@@ -2572,7 +2618,7 @@ return null;
 async function buildCoordFallback(
 ctx: Ctx,
 park: "land" | "sea",
-planItems: { name: string; area?: string | null; lat?: number | null; lng?: number | null}[][],
+planItems: { name: string; kind?: string | null; area?: string | null; lat?: number | null; lng?: number | null}[][],
 ): Promise<{
 fallback: Map<string, CoordResolution>;
 parkWide: Map<string, { lat: number; lng: number; areaName: string}>;
@@ -2785,14 +2831,15 @@ const AREA_MATRIX_BASE_M_PER_MIN = 70;
 //
 // Owner-set values (2026-11-14, adjustable constants — change them
 // here and in the client copy in plan_metrics.ts): 1 → 0.8,
-// 2 → 0.9, 3 → 1.0, 4 → 2.5 (interpolated), 5 → 5.0 (owner's fixed
+// 2 → 0.9, 3 → 1.0, 4 → 2.0 (owner-set 2026-11-19 from measured
+// level-4/level-3 wait ratios), 5 → 5.0 (owner's fixed
 // value: Soaring posted a 340-minute wait on 2026-01-06, so a
 // peak-day headline wait can reach five times the base estimate).
 const CROWD_WAIT_FACTOR_CAPS: Record<number, number> = {
 1: 0.8,
 2: 0.9,
 3: 1.0,
-4: 2.5,
+4: 2.0,
 5: 5.0,
 };
 
@@ -2800,7 +2847,7 @@ function crowdFactorCap(level: number): number {
 return CROWD_WAIT_FACTOR_CAPS[level] ?? 1.0;
 }
 
-// "×2.5" / "×1.0" style factor label for records and displays.
+// "×2.0" / "×1.0" style factor label for records and displays.
 function crowdFactorLabel(factor: number): string {
 return `×${Number.isInteger(factor) ? factor.toFixed(1) : String(factor)}`;
 }
@@ -4243,7 +4290,1092 @@ function checkDeclaredSectionCounts(rawText: string): {
 // planning request, is not planned at all.
 const SCOPE_BOUNDARY_STEP = `【適用範囲の境界（入口判定・無理ゲートの前段）】このアプリはディズニー旅行計画のためのアプリであり、万能アプリではない。元のリクエストがディズニー旅行計画と無関係な場合、または計画リクエストとして意味をなさない場合は、プラン制作自体を行わず、その旨を簡潔に正直に伝えて終了すること（失敗報告にその旨を簡潔に書く）。無理にプラン化したり、骨組みを完了扱いにしたりしないこと。境界に近い場合（計画依頼として解釈できる余地がある場合）は制作を止めず、不足分を聞き返す通常の流れで扱うこと。`;
 
-const CANONICAL_FETCH_STEPS = `【正典ソース取得の3段手順（必須）】ステップ0（同一性チェック）：既知のURLを開いたら、まず「期待したページか」を判定すること（期待する種類のページで、期待するリストが存在するか）。ダメな場合（移動・消滅・別物化）は、そのURLでの取得に進まず、まず現在の正しいページを探し、新しいURLで取得すること（ソース位置の再配置）。ステップ1（ブラウザ取得・必須要件）：取得は必ず実ブラウザ（タブ切替・「もっと見る」等の展開・スクロールでの遅延読み込みを実際に操作できるライブブラウザ）で行い、全タブを切り替え、展開要素は全て開き、分割された内容は全て取得すること。GET／静的フェッチ／テキスト抽出だけで得たテキストを、正典スナップショットの本文として保存してはならない。これは手順の好みではなくアプリの必須要件である：サーバーは fetchMethod="browser" で保存されたスナップショットしか正典にしない（GET取得の本文は、完全性照合の申告が passed でも、本文に錨があっても、正典にならず、ファクトの根拠に一切使えない）。したがって、正典ソース集合（DPA案内ページ・施設全一覧・運営/休止情報・公演スケジュール・チケット価格・告知一覧）とレストラン詳細ページの取得に、一括取得スクリプトや静的フェッチを使ってはならない（スクリプトは辞書の静的属性＝座標・エリア・所要時間・写真URLの取得専用）。実ブラウザで取得できないソースは、GETで代替せず「取得できなかった」として扱うこと（DPAページが実ブラウザで取れなければファクトは作れないので、DPA前提の行は作らない。レストラン詳細ページが実ブラウザで取れなければ、その店のファクトは登録しない）。fetchMethod には実際の取得方法を正直に入れること（GETで取った本文を "browser" と偽る申告は捏造であり、絶対にしてはならない）。ステップ2（完全性照合の申告）：saveSourceSnapshots の保存時には、各スナップショットに取得方法（fetchMethod）と完全性照合の申告（completeness）を必ず渡すこと。期待値はソース自身から導く（優先順位：(1) ページ自身の宣言・構造。例：「全N件」の宣言と列挙件数の一致。(2) 兄弟ソースとの整合。例：DPA対象は施設全一覧の部分集合。(3) 同じソースの過去スナップショットとの連続性）。期待値が導けない場合や照合に失敗した場合は、その旨を正直に申告すること（result＝not_derivable／failed）。そのスナップショットは正典にならない（正典かどうかはサーバーが決める）ので、取り直すか、それに基づくファクトは未確認として扱うこと。部分的なテキストを完全なものとして申告してはならない。なお正典化には、本文の中にサーバーが機械検証できる錨（「全N件」の宣言と価格つき列挙件数の一致、「…一覧 N件」の宣言と列挙行数の一致など）が少なくとも1つ存在し、その照合が一致することが必須である。自由文の期待値申告だけでは正典にならない（錨の無いテキストは、申告が「passed」でも正典化されない）。`;
+const CANONICAL_FETCH_STEPS = `【正典ソース取得の3段手順（必須）】ステップ0（同一性チェック）：既知のURLを開いたら、まず「期待したページか」を判定すること（期待する種類のページで、期待するリストが存在するか）。ダメな場合（移動・消滅・別物化）は、そのURLでの取得に進まず、まず現在の正しいページを探し、新しいURLで取得すること（ソース位置の再配置）。ステップ1（ブラウザ取得・必須要件）：取得は必ず実ブラウザ（タブ切替・「もっと見る」等の展開・スクロールでの遅延読み込みを実際に操作できるライブブラウザ）で行い、全タブを切り替え、展開要素は全て開き、分割された内容は全て取得すること。GET／静的フェッチ／テキスト抽出だけで得たテキストを、正典スナップショットの本文として保存してはならない。これは手順の好みではなくアプリの必須要件である：サーバーは fetchMethod="browser" で保存されたスナップショットしか正典にしない（GET取得の本文は、完全性照合の申告が passed でも、本文に錨があっても、正典にならず、ファクトの根拠に一切使えない）。したがって、正典ソース集合（DPA案内ページ・施設全一覧・運営/休止情報・公演スケジュール・チケット価格・告知一覧）とレストラン詳細ページの取得に、一括取得スクリプトや静的フェッチを使ってはならない（保管庫（Cloudflare）の束／スナップショット経由はこの限りではない：保管庫の本文は保管庫側が実ブラウザ相当の取得をしたもので、出所は fetchMethod="storehouse" として記録する）（静的フェッチのスクリプトは辞書の静的属性＝座標・エリア・所要時間・写真URLの取得専用。正典ソースの読み取り自体は、実ブラウザを操作する読み取り用スクリプトで1ページずつ行ってよい——その場合の取得方法は実ブラウザであり、下記の「読み取りの区切りの時刻」はそのスクリプトが記録する）。実ブラウザで取得できないソースは、GETで代替せず「取得できなかった」として扱うこと（DPAページが実ブラウザで取れなければファクトは作れないので、DPA前提の行は作らない。レストラン詳細ページが実ブラウザで取れなければ、その店のファクトは登録しない。ただしレストラン詳細ページは保管庫の束が原則の取得経路であり、束にある店はその本文（fetchMethod="storehouse"、sourceFetchedAt＝保管庫の取得時刻で保存したもの）を根拠にファクトを登録できる。また正典ソースの自前のブラウザ取得が失敗した場合は、最後の手段として保管庫のスナップショットを同じ形（fetchMethod="storehouse"・sourceFetchedAtつき）で材料にできる。保管庫由来の本文を "browser" と偽ることは捏造であり絶対にしないこと。保管庫由来のスナップショットは正典にはならない（正典化の条件は従来どおり）。fetchMethod には実際の取得方法を正直に入れること（GETで取った本文を "browser" と偽る申告は捏造であり、絶対にしてはならない）。ステップ2（完全性照合の申告）：saveSourceSnapshots の保存時には、各スナップショットに取得方法（fetchMethod）と完全性照合の申告（completeness）を必ず渡すこと。期待値はソース自身から導く（優先順位：(1) ページ自身の宣言・構造。例：「全N件」の宣言と列挙件数の一致。(2) 兄弟ソースとの整合。例：DPA対象は施設全一覧の部分集合。(3) 同じソースの過去スナップショットとの連続性）。期待値が導けない場合や照合に失敗した場合は、その旨を正直に申告すること（result＝not_derivable／failed）。そのスナップショットは正典にならない（正典かどうかはサーバーが決める）ので、取り直すか、それに基づくファクトは未確認として扱うこと。部分的なテキストを完全なものとして申告してはならない。なお正典化には、本文の中にサーバーが機械検証できる錨（「全N件」の宣言と価格つき列挙件数の一致、「…一覧 N件」の宣言と列挙行数の一致など）が少なくとも1つ存在し、その照合が一致することが必須である。自由文の期待値申告だけでは正典にならない（錨の無いテキストは、申告が「passed」でも正典化されない）。【読み取りの区切りの時刻（必須）】公式ページの読み取りは、実ブラウザを操作する読み取り用スクリプトが1ページずつ行い（静的フェッチではなく、タブ切替・「もっと見る」の展開・スクロール等の操作を実ブラウザで行うもの）、スクリプト自身の時計で次の区切りを記録すること：(a) ページを開き始めた時刻、(b) ページの読み込みが終わった時刻、(c) 必要な操作（タブの状態確認、「もっと見る」の展開、チケットページでのカレンダー部分までのスクロール等）が終わった時刻（操作が無いページでは null）、(d) 文章を取り出した時刻。記録した区切りは、写しの保存時に saveSourceSnapshots の readTimings（{openStartedAt, loadCompletedAt, operationsCompletedAt, textExtractedAt}、ISO形式）として、そのページの写しと一緒に渡すこと。サーバーが、保存時にこの区切り（区間ごとの秒数つき）を過程記録に残し、写しの記録にも残す。これにより、読み込み待ち・操作・文章の取り出しのどこに時間がかかったかが、プログラムの時計の記録から直接分かる。タスク自身の開始／終了の自己申告は、読み取りについては完全に廃止する（書かないこと）。なお、スクリプトが担うのは、ブラウザでページを開いて文章を取り出すところと、その区切りの時刻を打つところまでである。取り出した文章を読み、施設ごとの事実に構造化する部分（ファクト構築）は、ページの構造が変わっても対応できるようにするための設計であり、従来どおりAIが本文を読んで行うこと——スクリプトで事実を抜く形に変えてはならない。今回変えるのは記録と計測の仕方だけであり、内容の読み取り方そのものは変えない。`;
+
+// ---------- acquisition plan layer v3 （取得計画層） ----------
+//
+// The plan layer's shared machinery (owner's design, 2026-11-19,
+// finalised as "acquisition plan v3 — sitemap-rooted"). The plan
+// is a TREE built from the official sitemap: sitemap.xml is a
+// plain HTTP GET (no browser), and its URL paths ARE the site
+// tree — trunk and branches (hub pages; list pages in directory
+// form). Detail pages and dated daily pages are absent from the
+// sitemap by construction: the daily node hangs under the daily
+// branch, and restaurant detail pages are leaves under the
+// restaurant-list node, enumerated from the list pages (and, in
+// this implementation, registered via the storehouse / own
+// snapshots — see acquisition_restaurant_leaves).
+//
+// ONE clock: the plan and every snapshot are valid for 3 hours.
+// The rebuild decision uses ONLY the clock — the server never
+// fetches the sitemap itself (owner's decision, 2026-11-19: the
+// app server's plain HTTP fetch to the official site does not
+// complete, so the sitemap-carrying role moved to the fetching
+// task / AI layer). planAcquisition answers an expired (or
+// missing) plan with planState="rebuild" + needsSitemap=true and
+// attempts no fetch of its own; the task then reads the sitemap
+// URL set from the Cloudflare storehouse (getStorehouseSitemap —
+// the storehouse fetches sitemap.xml with Browser Run and serves
+// the Japanese-only set; the sitemap URL heads its circulation
+// list) and hands it to submitSitemap, falling back to a plain
+// GET of sitemap.xml in its own environment only when the
+// storehouse holds none. submitSitemap validates the set
+// (official domain only),
+// compares the branch-restricted set against the stored one,
+// persists the whole tree atomically, and returns the same
+// decision shape as planAcquisition. If the task cannot fetch
+// the sitemap either, it discloses that and proceeds on the
+// existing plan skeleton — the creation instant is not advanced,
+// so the next turn retries the rebuild. After a rebuild, the
+// WHOLE tree is replaced (never a partial revision), and the
+// rebuild's fetches double as that run's execution material.
+// If the sitemap URL set restricted to the branches the plan uses
+// shows no added / removed / moved branch, the skeleton counts as
+// identical. Execution never changes the plan mid-run; a fetch
+// failure is left in the run's fetch record and becomes material
+// for the next rebuild.
+//
+// planAcquisition (below, in the Actions map) is the deterministic
+// decision function over the stored tree plus stored snapshots:
+// reuse is decided ONLY by "a snapshot of that node's URL exists
+// and was fetched within 3 hours of the evaluation instant" —
+// canonicality does not enter the decision (the canonical gate in
+// saveSourceSnapshots / saveNormalizedFacts is unchanged and
+// still governs what may ground facts). The daily node is the one
+// exception to pure freshness: its snapshots must be ABOUT the
+// target date, and when the target date is the evaluation day,
+// the daily node is always fetched.
+//
+// Canonicality itself is UNCHANGED: only a real-browser fetch
+// whose anchor the server verified becomes canonical
+// (saveSourceSnapshots decides), and only canonical snapshots
+// ground normalized facts. Storehouse material (below) is
+// recorded with fetchMethod "storehouse" and its own fetch time —
+// never relabelled "browser" — and never becomes canonical.
+
+const SITEMAP_URL = "https://www.tokyodisneyresort.jp/sitemap.xml";
+const STOREHOUSE_BASE_URL =
+"https://disney-storehouse.hinoragi2034.workers.dev";
+const PLAN_VALIDITY_MS = 3 * 60 * 60 * 1000;
+
+type PlanNodeDef = {
+nodeKey: string;
+scope: "common" | "park";
+kinds: string[];
+urlTemplate: string;
+urlMatch: string;
+stateFragmentLand: string | null;
+stateFragmentSea: string | null;
+operations: string;
+anchor: string;
+note: string | null;
+// Sitemap branch prefixes (path templates, {P} = tdl/tds) whose
+// presence in the sitemap URL set proves this node's branch
+// exists. List pages appear in the sitemap in directory form,
+// so prefixes are branch roots, not the page URLs themselves.
+branchPrefixes: string[];
+};
+
+// The tree's node definitions (spec: acquisition plan v3 §4).
+// {P} = tdl/tds, {D} = target date YYYYMMDD. Counts in anchors are
+// never fixed values: they are measured on every rebuild/fetch
+// from the page's own declarations.
+const PLAN_NODE_DEFS: PlanNodeDef[] = [
+{
+nodeKey: "dpa",
+scope: "common",
+kinds: ["dpa_page"],
+urlTemplate: "tdr/guide/app_service/disneypremieraccess.html",
+urlMatch: "disneypremieraccess.html",
+stateFragmentLand: "#tab-6546897=tdl&attraction-more-7103730=open",
+stateFragmentSea: "#tab-6546897=tds&attraction-more-7040603=open",
+operations:
+"主：対象パークの状態つきURLで開く（シーは stateFragmentSea、ランドは stateFragmentLand を付けたURL）。読み込み後に錨で判定し、合わなければ対象パークのタブを押し、節ごとに錨まで「もっと見る」を押して開く。対象パーク分のみ取る。対象パークでない側は開かない。スクロール不要",
+anchor:
+"節ごとの宣言件数と、価格つき列挙件数が一致すること（対象パーク分のみ）",
+note: null,
+branchPrefixes: ["tdr/guide/app_service/"],
+},
+{
+nodeKey: "announcements",
+scope: "common",
+kinds: ["announcements"],
+urlTemplate: "tdr/news/update.html",
+urlMatch: "news/update.html",
+stateFragmentLand: null,
+stateFragmentSea: null,
+operations: "開くのみ。スクロール不要",
+anchor:
+"一覧が存在し、ページの注記「最新の20件のみ表示」があること",
+note: "正典の選択（更新情報／大切なお知らせ）は未決のまま変えない",
+branchPrefixes: ["tdr/news/"],
+},
+{
+nodeKey: "attraction",
+scope: "park",
+kinds: ["facility_list"],
+urlTemplate: "{P}/attraction.html",
+urlMatch: "attraction.html",
+stateFragmentLand: null,
+stateFragmentSea: null,
+operations: "開くのみ（操作なし）。スクロール不要",
+anchor:
+"ページ自身の件数宣言と列挙件数が一致すること（件数は作り直しのたびに実測し、固定値にしない）",
+note: null,
+branchPrefixes: ["{P}/attraction"],
+},
+{
+nodeKey: "show",
+scope: "park",
+kinds: ["facility_list"],
+urlTemplate: "{P}/show.html",
+urlMatch: "show.html",
+stateFragmentLand: null,
+stateFragmentSea: null,
+operations: "開くのみ（操作なし）。スクロール不要",
+anchor:
+"ページ自身の件数宣言と列挙件数が一致すること（件数は作り直しのたびに実測し、固定値にしない）",
+note: "一覧外の「サービス・情報」は母集合に入れない",
+branchPrefixes: ["{P}/show"],
+},
+{
+nodeKey: "daily",
+scope: "park",
+kinds: ["operations", "show_schedule"],
+urlTemplate: "{P}/daily/calendar/{D}/",
+urlMatch: "daily/calendar",
+stateFragmentLand: null,
+stateFragmentSea: null,
+operations:
+"開く→折りたたみのうちアトラクション／ショー／レストランの3つだけ開く（他のカテゴリは開かない）。スクロール不要",
+anchor:
+"開園時間の表記・当日の大人価格・公演セクションの存在が確認できること。遠い日付で公演が「未定」なのは異常ではない",
+note: "デイリーはサイトマップに載らない葉（日付ページ）。枝は {P}/daily の存在で判定する",
+branchPrefixes: ["{P}/daily"],
+},
+{
+nodeKey: "monthly",
+scope: "park",
+kinds: ["monthly_calendar"],
+urlTemplate: "{P}/monthly/calendar.html",
+urlMatch: "monthly/calendar.html",
+stateFragmentLand: null,
+stateFragmentSea: null,
+operations: "開くのみ。スクロール不要",
+anchor: "対象月の表示が存在すること",
+note: null,
+branchPrefixes: ["{P}/monthly"],
+},
+{
+nodeKey: "ticket",
+scope: "park",
+kinds: ["ticket_prices"],
+urlTemplate: "{P}/ticket/index.html",
+urlMatch: "ticket/index.html",
+stateFragmentLand: null,
+stateFragmentSea: null,
+operations:
+"開く→ページ下部の「カレンダー」部分までスクロールし、日別の1デーパスポート価格が本文に現れてから取り込むこと。カレンダー部分が本文に無い取得は未完了として扱うこと（価格表だけで取り終えてはならない）",
+anchor:
+"価格表が存在し、カレンダー部分に対象日の1デーパスポート（大人）価格が表示されていること",
+note: null,
+branchPrefixes: ["{P}/ticket"],
+},
+{
+nodeKey: "restaurant_list",
+scope: "park",
+kinds: ["restaurant_list"],
+urlTemplate: "{P}/restaurant/list.html",
+urlMatch: "restaurant/list.html",
+stateFragmentLand: null,
+stateFragmentSea: null,
+operations:
+"保管庫のスナップショット（GET /snapshot）から読むのが原則。保管庫に無い時だけ実ブラウザで開く（開くのみ・スクロール不要）。詳細ページはこの一覧の下の葉であり、取得は保管庫の束を原則とする（計画層の手順参照）",
+anchor: "一覧が存在すること",
+note: null,
+branchPrefixes: ["{P}/restaurant"],
+},
+];
+
+type AcquisitionPlanNode = PlanNodeDef & {
+branchParks: { land: boolean; sea: boolean};
+};
+
+function parseStringArray(json: string | null | undefined): string[] {
+if (!json) return [];
+try {
+const parsed: unknown = JSON.parse(json);
+if (Array.isArray(parsed)) {
+return parsed.filter((v): v is string => typeof v === "string");
+}
+} catch {
+return [];
+}
+return [];
+}
+
+function planBranchPathPrefixes(): string[] {
+const prefixes: string[] = [];
+for (const def of PLAN_NODE_DEFS) {
+for (const bp of def.branchPrefixes) {
+if (bp.includes("{P}")) {
+prefixes.push("/" + bp.replaceAll("{P}", "tdl"));
+prefixes.push("/" + bp.replaceAll("{P}", "tds"));
+} else {
+prefixes.push("/" + bp);
+}
+}
+}
+return prefixes;
+}
+
+// Reduce a sitemap URL set (full URLs, extracted from sitemap.xml
+// by the fetching task and carried in via submitSitemap) to the
+// URL paths (Japanese tree only; the /en/ /tc/ /sc/ /kr/ trees are
+// the same site in other languages and are not the plan's
+// branches) under the branches the plan uses. Throws when the set
+// is empty or carries any URL that is not on the official domain:
+// a submission that is not the official sitemap must never become
+// the plan's basis.
+function reduceSitemapUrls(urls: string[]): {
+paths: string[];
+totalCount: number;
+} {
+if (urls.length === 0) {
+throw new Error("submitSitemap: URLが1件も渡されていません。");
+}
+const prefixes = planBranchPathPrefixes();
+const paths = new Set<string>();
+for (const raw of urls) {
+let parsed: URL;
+try {
+parsed = new URL(raw);
+} catch {
+throw new Error(
+`submitSitemap: URLとして読めない値が含まれています: ${raw}`,
+);
+}
+if (parsed.hostname !== "www.tokyodisneyresort.jp") {
+throw new Error(
+`submitSitemap: 公式ドメイン以外のURLが含まれています: ${raw}`,
+);
+}
+const path = parsed.pathname;
+if (/^\/(en|tc|sc|kr)\//.test(path)) continue;
+if (prefixes.some((p) => path.startsWith(p))) paths.add(path);
+}
+return { paths: [...paths].sort(), totalCount: urls.length};
+}
+
+function materializePlanNodes(
+pathSet: ReadonlySet<string> | null,
+): AcquisitionPlanNode[] {
+return PLAN_NODE_DEFS.map((def) => {
+if (!pathSet) {
+// No sitemap evidence (its GET failed and no plan was ever
+// stored): assume the branches exist; the next successful
+// rebuild replaces this with measured presence.
+return {...def, branchParks: { land: true, sea: true}};
+}
+const present = (parkCode: "tdl" | "tds"): boolean =>
+def.branchPrefixes.some((bp) => {
+const prefix = "/" + bp.replaceAll("{P}", parkCode);
+for (const p of pathSet) {
+if (p.startsWith(prefix)) return true;
+}
+return false;
+});
+return {
+...def,
+branchParks: { land: present("tdl"), sea: present("tds")},
+};
+});
+}
+
+async function loadAcquisitionPlanNodes(
+ctx: Ctx,
+): Promise<AcquisitionPlanNode[]> {
+const db = ctx.db<typeof schema>();
+const rows = await db.select().from(schema.acquisitionPlanNodes);
+const order = new Map(PLAN_NODE_DEFS.map((d, i) => [d.nodeKey, i]));
+return rows
+.map((r): AcquisitionPlanNode => {
+let branchParks = { land: true, sea: true};
+try {
+const parsed: unknown = JSON.parse(r.branchParksJson);
+if (parsed!= null && typeof parsed === "object") {
+const p = parsed as { land?: unknown; sea?: unknown};
+branchParks = {
+land: p.land === true,
+sea: p.sea === true,
+};
+}
+} catch {
+branchParks = { land: true, sea: true};
+}
+const def = PLAN_NODE_DEFS.find((d) => d.nodeKey === r.nodeKey);
+return {
+nodeKey: r.nodeKey,
+scope: r.scope,
+kinds: parseStringArray(r.kindsJson),
+urlTemplate: r.urlTemplate,
+urlMatch: r.urlMatch,
+stateFragmentLand: r.stateFragmentLand,
+stateFragmentSea: r.stateFragmentSea,
+operations: r.operations,
+anchor: r.anchor,
+note: r.note,
+branchPrefixes: def?.branchPrefixes?? [],
+branchParks,
+};
+})
+.sort(
+(a, b) =>
+(order.get(a.nodeKey)?? 99) - (order.get(b.nodeKey)?? 99),
+);
+}
+
+type AcquisitionPlanEnsured = {
+planState: "fresh" | "rebuild";
+planCreatedAt: Date | null;
+skeletonSame: boolean | null;
+needsSitemap: boolean;
+sitemapUrls: string[];
+sitemapTotalCount: number | null;
+nodes: AcquisitionPlanNode[];
+};
+
+// Persist a whole plan tree atomically: the plan row (sitemap URL
+// set + creation instant), the full node set, in ONE batch (the
+// runtime's transaction unit). A rebuild either lands completely
+// or not at all — a half-written tree (plan row without nodes, or
+// nodes without a creation instant) would corrupt the single
+// clock every later fresh/rebuild judgement depends on.
+async function persistAcquisitionPlan(
+ctx: Ctx,
+existingPlanId: number | null,
+nodes: AcquisitionPlanNode[],
+values: {
+sitemapUrlsJson: string;
+sitemapTotalCount: number;
+planCreatedAt: Date;
+sitemapFetchedAt: Date | null;
+},
+): Promise<void> {
+const db = ctx.db<typeof schema>();
+const statements: BatchItem<"sqlite">[] = [];
+statements.push(db.delete(schema.acquisitionPlanNodes));
+for (const n of nodes) {
+statements.push(
+db.insert(schema.acquisitionPlanNodes).values({
+nodeKey: n.nodeKey,
+scope: n.scope,
+kindsJson: JSON.stringify(n.kinds),
+urlTemplate: n.urlTemplate,
+urlMatch: n.urlMatch,
+stateFragmentLand: n.stateFragmentLand,
+stateFragmentSea: n.stateFragmentSea,
+operations: n.operations,
+anchor: n.anchor,
+note: n.note,
+branchParksJson: JSON.stringify(n.branchParks),
+}),
+);
+}
+const planValues = {
+sitemapUrl: SITEMAP_URL,
+sitemapUrlsJson: values.sitemapUrlsJson,
+sitemapTotalCount: values.sitemapTotalCount,
+planCreatedAt: values.planCreatedAt,
+sitemapFetchedAt: values.sitemapFetchedAt,
+updatedAt: new Date(),
+};
+if (existingPlanId != null) {
+statements.push(
+db
+.update(schema.acquisitionPlans)
+.set(planValues)
+.where(eq(schema.acquisitionPlans.id, existingPlanId)),
+);
+} else {
+statements.push(db.insert(schema.acquisitionPlans).values(planValues));
+}
+const [first, ...rest] = statements;
+if (first) await db.batch([first, ...rest]);
+}
+
+// The rebuild decision — clock ONLY. The server never fetches
+// the sitemap (see the layer header): while a complete plan is
+// stored and inside its 3 hours, the plan is fresh and reads come
+// from the stored rows. Past expiry (or with no complete plan
+// stored), this returns planState="rebuild" with needsSitemap=true
+// and attempts NO fetch: the fetching task carries the sitemap
+// URL set in through submitSitemap, which does the comparison
+// and the atomic persist. Until a set is submitted, decisions
+// are computed on the existing skeleton — the stored tree, or the
+// default tree (branch presence assumed, assembled in memory
+// only, never persisted) when nothing is stored — and the
+// creation instant is NOT advanced, so the next turn retries
+// the rebuild.
+async function ensureAcquisitionPlan(
+ctx: Ctx,
+at: Date,
+): Promise<AcquisitionPlanEnsured> {
+const db = ctx.db<typeof schema>();
+const metaRows = await db.select().from(schema.acquisitionPlans).limit(1);
+const meta = metaRows[0];
+const storedNodes = await loadAcquisitionPlanNodes(ctx);
+// A stored plan counts only as a complete unit: the plan row AND
+// every node of the tree. Anything less (e.g. a legacy partial
+// write) is treated as "no plan" and rebuilt + persisted whole.
+const hasStoredPlan =
+meta != null && storedNodes.length >= PLAN_NODE_DEFS.length;
+if (
+hasStoredPlan &&
+at.getTime() - meta.planCreatedAt.getTime() <= PLAN_VALIDITY_MS
+) {
+return {
+planState: "fresh",
+planCreatedAt: meta.planCreatedAt,
+skeletonSame: null,
+needsSitemap: false,
+sitemapUrls: parseStringArray(meta.sitemapUrlsJson),
+sitemapTotalCount: meta.sitemapTotalCount,
+nodes: storedNodes,
+};
+}
+return {
+planState: "rebuild",
+planCreatedAt: hasStoredPlan ? (meta?.planCreatedAt ?? null) : null,
+skeletonSame: null,
+needsSitemap: true,
+sitemapUrls: hasStoredPlan ? parseStringArray(meta?.sitemapUrlsJson) : [],
+sitemapTotalCount: hasStoredPlan ? (meta?.sitemapTotalCount ?? null) : null,
+nodes: hasStoredPlan ? storedNodes : materializePlanNodes(null),
+};
+}
+
+// Accept the sitemap URL set carried in by the fetching task
+// (the submitSitemap action): validate it (official domain only
+// — reduceSitemapUrls throws otherwise), compare the
+// branch-restricted set against the stored one
+// (skeletonSameAsPrevious; null when no earlier set was ever
+// stored, i.e. there is no basis for comparison), persist the
+// plan row, the whole node set, the sitemap URL set and the
+// creation instant together (persistAcquisitionPlan), and return
+// the rebuilt plan in the same ensured shape planAcquisition
+// consumes. The returned tree is re-read from the stored rows.
+async function submitAcquisitionPlanSitemap(
+ctx: Ctx,
+urls: string[],
+at: Date,
+): Promise<AcquisitionPlanEnsured> {
+const db = ctx.db<typeof schema>();
+const reduced = reduceSitemapUrls(urls);
+const metaRows = await db.select().from(schema.acquisitionPlans).limit(1);
+const meta = metaRows[0];
+const prevPaths = meta ? parseStringArray(meta.sitemapUrlsJson) : null;
+const skeletonSame =
+prevPaths != null && prevPaths.length > 0
+? prevPaths.length === reduced.paths.length &&
+prevPaths.every((p, i) => p === reduced.paths[i])
+: null;
+const nodes = materializePlanNodes(new Set(reduced.paths));
+await persistAcquisitionPlan(ctx, meta?.id ?? null, nodes, {
+sitemapUrlsJson: JSON.stringify(reduced.paths),
+sitemapTotalCount: reduced.totalCount,
+planCreatedAt: at,
+sitemapFetchedAt: new Date(),
+});
+return {
+planState: "rebuild",
+planCreatedAt: at,
+skeletonSame,
+needsSitemap: false,
+sitemapUrls: reduced.paths,
+sitemapTotalCount: reduced.totalCount,
+nodes: await loadAcquisitionPlanNodes(ctx),
+};
+}
+
+// The per-node decision computation shared by planAcquisition
+// and submitSitemap: for one park + target date, decide per tree
+// node whether the run FETCHES the page (returning the
+// materialized URL and the node's operations) or REUSES a stored
+// snapshot (returning its id and fetch time), or SKIPS the node
+// (its branch is absent from the sitemap the plan was built
+// from). Reuse is judged ONLY by snapshot existence and
+// freshness: a snapshot of the node's URL fetched within 3 hours
+// of the evaluation instant. Canonicality, fetch method and
+// completeness declarations do NOT enter the decision. The daily
+// node additionally requires its snapshots to be about the
+// target date, and when the target date is the evaluation day
+// the daily node is always fetched regardless of freshness. The
+// restaurant_list node is storehouse-first: with no fresh local
+// snapshot its decision is "storehouse". Restaurant detail
+// leaves are never fetched by the run: each is "storehouse".
+async function computeAcquisitionDecisions(
+ctx: Ctx,
+plan: AcquisitionPlanEnsured,
+park: "land" | "sea",
+targetDate: string,
+at: Date,
+) {
+const db = ctx.db<typeof schema>();
+const isToday = targetDate === jstTodayIso(at);
+// Snapshot metadata for this park, newest first. Raw texts are
+// not loaded here: the decision needs only existence + fetch
+// time (plus the completeness note for the facility_list anchor
+// exception in snapshotMatchesPlanNode).
+const snaps = await db
+.select({
+id: schema.sourceSnapshots.id,
+kind: schema.sourceSnapshots.kind,
+targetDate: schema.sourceSnapshots.targetDate,
+url: schema.sourceSnapshots.url,
+completenessNote: schema.sourceSnapshots.completenessNote,
+fetchedAt: schema.sourceSnapshots.fetchedAt,
+})
+.from(schema.sourceSnapshots)
+.where(eq(schema.sourceSnapshots.park, park))
+.orderBy(desc(schema.sourceSnapshots.fetchedAt))
+.limit(1000);
+const usable = snaps.filter((s) => s.fetchedAt.getTime() <= at.getTime());
+type SnapMeta = (typeof usable)[number];
+
+type NodeDecision = {
+nodeKey: string;
+kinds: string[];
+decision: "reuse" | "fetch" | "skip" | "storehouse";
+reason: string;
+url: string | null;
+operations: string | null;
+anchor: string;
+snapshotId: number | null;
+snapshotIds: number[];
+snapshotFetchedAt: string | null;
+};
+const decisions: NodeDecision[] = [];
+for (const node of plan.nodes) {
+if (!node.branchParks[park]) {
+decisions.push({
+nodeKey: node.nodeKey,
+kinds: node.kinds,
+decision: "skip",
+reason:
+"この枝は、計画を作ったサイトマップに存在しないため取得しない（前提の崩れとして扱う）",
+url: null,
+operations: null,
+anchor: node.anchor,
+snapshotId: null,
+snapshotIds: [],
+snapshotFetchedAt: null,
+});
+continue;
+}
+const matched = usable.filter((s) => snapshotMatchesPlanNode(s, node));
+// The snapshots this node would adopt. The daily node is
+// date-bound and produces one snapshot per kind: every kind
+// must have a snapshot about targetDate, and the OLDEST of
+// them governs the node's freshness. Every other node adopts
+// its latest matching snapshot.
+let adopted: SnapMeta[] = [];
+if (node.nodeKey === "daily") {
+const perKind: SnapMeta[] = [];
+let completeSet = node.kinds.length > 0;
+for (const kind of node.kinds) {
+const latest = matched.find(
+(s) => s.kind === kind && s.targetDate === targetDate,
+);
+if (latest) perKind.push(latest);
+else completeSet = false;
+}
+adopted = completeSet ? perKind : [];
+} else {
+const latest = matched[0];
+adopted = latest ? [latest] : [];
+}
+const effectiveFetchedAt =
+adopted.length > 0
+? new Date(Math.min(...adopted.map((s) => s.fetchedAt.getTime())))
+: null;
+let decision: "reuse" | "fetch";
+let reason: string;
+if (node.nodeKey === "daily" && isToday) {
+decision = "fetch";
+reason = "対象日が当日のため、デイリーは鮮度に関係なく取得する";
+} else if (adopted.length === 0) {
+decision = "fetch";
+reason = "再利用できるスナップショットが無いため取得する";
+} else if (
+effectiveFetchedAt != null &&
+at.getTime() - effectiveFetchedAt.getTime() > PLAN_VALIDITY_MS
+) {
+decision = "fetch";
+reason = "最新の取得から3時間を超えたため取得する";
+} else {
+decision = "reuse";
+reason = "そのURLのスナップショットがあり、取得から3時間以内のため再利用する";
+}
+// The restaurant list is storehouse-first (owner's correction,
+// 2026-11-19): when it is not reusable locally, its decision is
+// "storehouse" — read the storehouse's snapshot of the list URL,
+// and fetch it with the own browser only when the storehouse
+// holds none. The URL and operations travel with the decision
+// for that fallback.
+const storehouseFirst =
+node.nodeKey === "restaurant_list" && decision === "fetch";
+decisions.push({
+nodeKey: node.nodeKey,
+kinds: node.kinds,
+decision: storehouseFirst ? "storehouse" : decision,
+reason: storehouseFirst
+? "レストラン一覧は保管庫のスナップショットから読むのが原則のため、まず保管庫を引く（保管庫に無ければ自前で取得する）"
+: reason,
+url:
+decision === "fetch"
+? expandAcquisitionPlanUrl(node, park, targetDate)
+: null,
+operations: decision === "fetch" ? node.operations : null,
+anchor: node.anchor,
+snapshotId: decision === "reuse" ? (adopted[0]?.id ?? null) : null,
+snapshotIds: decision === "reuse" ? adopted.map((s) => s.id) : [],
+snapshotFetchedAt:
+decision === "reuse" && effectiveFetchedAt
+? effectiveFetchedAt.toISOString()
+: null,
+});
+}
+const leaves = await db
+.select({ url: schema.acquisitionRestaurantLeaves.url })
+.from(schema.acquisitionRestaurantLeaves)
+.where(eq(schema.acquisitionRestaurantLeaves.park, park))
+.orderBy(asc(schema.acquisitionRestaurantLeaves.url));
+return {
+nodes: decisions,
+restaurantLeaves: leaves.map((l) => ({
+url: l.url,
+decision: "storehouse" as const,
+})),
+};
+}
+
+// The verified anchors recorded by the server's machine check in
+// the snapshot's completenessNote.
+function snapshotVerifiedAnchors(
+completenessNote: string | null,
+): { kind: string; declared: number; listed: number; label: string}[] {
+if (!completenessNote) return [];
+try {
+const parsed: unknown = JSON.parse(completenessNote);
+if (parsed!= null && typeof parsed === "object" && "machineCheck" in parsed) {
+const mc = (parsed as { machineCheck: unknown}).machineCheck;
+if (mc!= null && typeof mc === "object" && "anchors" in mc) {
+const anchors = (mc as { anchors: unknown}).anchors;
+if (Array.isArray(anchors)) {
+return anchors
+.filter(
+(a): a is { kind: string; declared: number; listed: number; label: string} =>
+a!= null &&
+typeof a === "object" &&
+typeof (a as { declared: unknown}).declared === "number" &&
+typeof (a as { listed: unknown}).listed === "number",
+)
+.map((a) => ({
+kind: typeof a.kind === "string"? a.kind: "",
+declared: a.declared,
+listed: a.listed,
+label: typeof a.label === "string"? a.label: "",
+}));
+}
+}
+}
+} catch {
+return [];
+}
+return [];
+}
+
+// A stored snapshot belongs to a plan node when its kind is one of
+// the node's kinds and its URL carries the node's match fragment.
+// One exception, grounded in how the official pages actually are:
+// the attraction page itself enumerates BOTH lists (attractions
+// and parades/shows), so a single facility_list snapshot saved
+// from it verifiably carries the show list too. Such a snapshot
+// also belongs to the other list's node when the server's machine
+// check verified THAT list's anchor in its text — the anchor is
+// the identity (the plan's own common rule: identity is judged by
+// the fetched page's own anchor), never the URL alone.
+function snapshotMatchesPlanNode(
+snap: { kind: string; url: string; completenessNote?: string | null},
+node: AcquisitionPlanNode,
+): boolean {
+if (!node.kinds.includes(snap.kind)) return false;
+if (snap.url.includes(node.urlMatch)) return true;
+if (snap.kind === "facility_list" && snap.completenessNote) {
+const anchors = snapshotVerifiedAnchors(snap.completenessNote);
+if (node.nodeKey === "attraction") {
+return anchors.some((a) => a.label.includes("アトラクション"));
+}
+if (node.nodeKey === "show") {
+return anchors.some(
+(a) => a.label.includes("ショー") || a.label.includes("パレード"),
+);
+}
+}
+return false;
+}
+
+// Expand a plan node's URL template for one run: {P} = tds/tdl,
+// {D} = target date as YYYYMMDD. The DPA node's per-park state
+// fragment (tab + expansion state) is appended so the page opens
+// directly in the target park's expanded state.
+function expandAcquisitionPlanUrl(
+node: AcquisitionPlanNode,
+park: "land" | "sea",
+targetDate: string,
+): string {
+const parkCode = park === "sea"? "tds": "tdl";
+const path = node.urlTemplate
+.replaceAll("{P}", parkCode)
+.replaceAll("{D}", targetDate.replaceAll("-", ""));
+let url = `https://www.tokyodisneyresort.jp/${path}`;
+const fragment =
+park === "sea"? node.stateFragmentSea: node.stateFragmentLand;
+if (fragment) url += fragment;
+return url;
+}
+
+// ---------- storehouse (Cloudflare 保管庫） ----------
+//
+// The storehouse is a Cloudflare Worker + KV that drip-fetches the
+// registered official URLs with Browser Run and serves the texts
+// back read-only. Copies never write content to it; the only write
+// is the URL list (POST /urls, sanity-gated on the storehouse
+// side: official domain only, 20–500 URLs). The sitemap heads the
+// circulation list: the storehouse serves its Japanese-only URL
+// set through GET /sitemap, which is the principal sitemap source
+// for the acquisition plan layer (getStorehouseSitemap).
+// Restaurant detail
+// pages are read from it as a bundle in principle, and the
+// restaurant list pages are read from its snapshots in principle
+// (own fetch only when the storehouse holds none); any other page
+// may be read from it only as the last resort when the copy's own
+// browser fetch failed. Material that came from the storehouse is
+// recorded with fetchMethod "storehouse" and the storehouse's own
+// fetch time (sourceFetchedAt) — never relabelled "browser".
+
+// The fixed URLs of the circulation list, in order: FIRST the
+// sitemap itself (the storehouse fetches it with Browser Run and
+// serves the Japanese-only URL set back through GET /sitemap —
+// see getStorehouseSitemap), then the fixed 13: the DPA page's
+// two state URLs (one per park), the announcements page, and per
+// park the attraction / show / monthly / ticket /
+// restaurant-list pages. The daily pages are NOT on the list
+// (they are dated; each copy fetches its target date live), and
+// neither are detail pages — those join the list as the
+// restaurant leaves.
+function storehouseFixedUrls(): string[] {
+const byKey = new Map(PLAN_NODE_DEFS.map((d) => [d.nodeKey, d]));
+const mk = (key: string, park: "land" | "sea"): string | null => {
+const def = byKey.get(key);
+if (!def) return null;
+const parkCode = park === "sea"? "tds": "tdl";
+let url = `https://www.tokyodisneyresort.jp/${def.urlTemplate.replaceAll("{P}", parkCode)}`;
+const fragment =
+park === "sea"? def.stateFragmentSea: def.stateFragmentLand;
+if (fragment) url += fragment;
+return url;
+};
+const urls: (string | null)[] = [
+SITEMAP_URL,
+mk("dpa", "sea"),
+mk("dpa", "land"),
+mk("announcements", "sea"),
+];
+for (const park of ["land", "sea"] as const) {
+for (const key of ["attraction", "show", "monthly", "ticket", "restaurant_list"]) {
+urls.push(mk(key, park));
+}
+}
+return urls.filter((u): u is string => u!= null);
+}
+
+function parkOfDetailUrl(url: string): "land" | "sea" | null {
+if (url.includes("/tds/restaurant/detail/")) return "sea";
+if (url.includes("/tdl/restaurant/detail/")) return "land";
+return null;
+}
+
+// Register newly learned restaurant detail URLs as plan leaves.
+// On conflict only the last-seen instant advances — the recorded
+// source (where the URL was first learned) is kept.
+async function upsertRestaurantLeaves(
+ctx: Ctx,
+entries: { url: string; park: "land" | "sea"; source: "storehouse" | "snapshot"}[],
+): Promise<void> {
+if (entries.length === 0) return;
+const db = ctx.db<typeof schema>();
+const now = new Date();
+for (const e of entries) {
+await db
+.insert(schema.acquisitionRestaurantLeaves)
+.values({
+url: e.url,
+park: e.park,
+source: e.source,
+firstSeenAt: now,
+lastSeenAt: now,
+})
+.onConflictDoUpdate({
+target: schema.acquisitionRestaurantLeaves.url,
+set: { lastSeenAt: now},
+});
+}
+}
+
+// ---------- storehouse reads save themselves (owner's fix, 2026-11-20) ----------
+//
+// Bug this closes: a run read the restaurant list from the
+// storehouse (getStorehouseSnapshot returned the text and the
+// read was recorded), but the task never saved that text as a
+// snapshot of the run — so the run's record carried the list as
+// UNCONFIRMED ("存在は確認したが、この回ではスナップショットと
+// して保存していない") and the completion message warned that
+// current-spec items were unconfirmed, even though the material
+// was in hand. Material the server itself read must not depend
+// on the task remembering to save it: when getStorehouseSnapshot
+// returns a text, the SERVER saves it here, at read time, as a
+// snapshot of the run — fetchMethod "storehouse", fetchedAt =
+// the storehouse's own fetch time (the sourceFetchedAt contract,
+// same as a task-side saveSourceSnapshots of storehouse
+// material). Storehouse material still NEVER becomes canonical
+// (canonicality requires exactly "browser"), and the daily
+// pages are never saved from the storehouse: they have no
+// storehouse substitute (the dated page is fetched live, always).
+//
+// The snapshot's kind and park are derived from the URL alone:
+// a restaurant detail URL is a restaurant_detail of its park;
+// every other URL is matched against the plan tree's node
+// definitions (urlMatch). A park-scoped node's park is in its
+// path (/tds/ / /tdl/); the common DPA page carries the park in
+// its state fragment; the common announcements page carries no
+// park, so the open run's plan-set park is used (the same park
+// a task-side save would record). When kind or park cannot be
+// determined the read still stands — only the save is skipped,
+// and the caller states that in the run record. An identical
+// storehouse snapshot (same URL, same storehouse fetch time)
+// already stored — by an earlier read or by the task itself —
+// is adopted instead of duplicated.
+type StorehouseSnapshotKind =
+| "dpa_page"
+| "facility_list"
+| "operations"
+| "show_schedule"
+| "ticket_prices"
+| "announcements"
+| "monthly_calendar"
+| "restaurant_list"
+| "restaurant_detail";
+
+const STOREHOUSE_SNAPSHOT_KINDS: readonly string[] = [
+"dpa_page",
+"facility_list",
+"operations",
+"show_schedule",
+"ticket_prices",
+"announcements",
+"monthly_calendar",
+"restaurant_list",
+"restaurant_detail",
+];
+
+async function saveStorehouseReadSnapshot(
+ctx: Ctx,
+args: { url: string; text: string; fetchedAt: string | null },
+): Promise<number | null> {
+try {
+const db = ctx.db<typeof schema>();
+// The daily pages have no storehouse substitute: never save
+// one from a storehouse read, whatever the storehouse holds.
+if (args.url.includes("daily/calendar")) return null;
+let kind: StorehouseSnapshotKind | null = null;
+let park: "land" | "sea" | null = null;
+const detailPark = parkOfDetailUrl(args.url);
+if (detailPark) {
+kind = "restaurant_detail";
+park = detailPark;
+} else {
+const def = PLAN_NODE_DEFS.find(
+(d) => d.kinds.length === 1 && args.url.includes(d.urlMatch),
+);
+const defKind = def?.kinds[0];
+if (def && defKind && STOREHOUSE_SNAPSHOT_KINDS.includes(defKind)) {
+kind = defKind as StorehouseSnapshotKind;
+if (def.scope === "park") {
+if (args.url.includes("/tds/")) park = "sea";
+else if (args.url.includes("/tdl/")) park = "land";
+} else {
+// Common pages: the DPA page's state fragment names the
+// park; the announcements page names none.
+let rest = args.url;
+try {
+const u = new URL(args.url);
+rest = u.pathname + u.search + u.hash;
+} catch {
+// Keep the raw URL as the search space.
+}
+if (rest.includes("tds")) park = "sea";
+else if (rest.includes("tdl")) park = "land";
+}
+}
+}
+const openRuns = await db
+.select({
+id: schema.runLogs.id,
+planSetId: schema.runLogs.planSetId,
+})
+.from(schema.runLogs)
+.where(eq(schema.runLogs.status, "open"))
+.orderBy(desc(schema.runLogs.id))
+.limit(1);
+const openRun = openRuns[0] ?? null;
+if (park == null && openRun) {
+const setRows = await db
+.select({ park: schema.planSets.park })
+.from(schema.planSets)
+.where(eq(schema.planSets.id, openRun.planSetId))
+.limit(1);
+park = setRows[0]?.park ?? null;
+}
+if (kind == null || park == null) return null;
+const sourceFetchedDate = args.fetchedAt
+? new Date(args.fetchedAt)
+: null;
+const hasSourceDate =
+sourceFetchedDate != null &&
+!Number.isNaN(sourceFetchedDate.getTime());
+// Dedupe: the same storehouse material (same URL, same
+// storehouse fetch time — or, when the storehouse gave no
+// fetch time, the identical text) is already this run's
+// snapshot; adopt it instead of storing a second copy.
+const existing = await db
+.select({ id: schema.sourceSnapshots.id })
+.from(schema.sourceSnapshots)
+.where(
+and(
+eq(schema.sourceSnapshots.url, args.url),
+eq(schema.sourceSnapshots.fetchMethod, "storehouse"),
+...(hasSourceDate && sourceFetchedDate
+? [eq(schema.sourceSnapshots.fetchedAt, sourceFetchedDate)]
+: [eq(schema.sourceSnapshots.rawText, args.text)]),
+),
+)
+.orderBy(desc(schema.sourceSnapshots.id))
+.limit(1);
+if (existing[0]) return existing[0].id;
+const machine = checkDeclaredSectionCounts(args.text);
+const completenessNote = JSON.stringify({
+declaration: null,
+fetchMethod: "storehouse",
+readTimings: null,
+sourceFetchedAt: args.fetchedAt ?? null,
+browserFetched: false,
+machineCheck: {
+sectionsChecked: machine.checked,
+mismatches: machine.mismatches,
+anchors: machine.anchors,
+anchorMissing: machine.anchors.length === 0,
+serverNote:
+"保管庫からの読み取り（getStorehouseSnapshot）の時点で、サーバーが自動で保存したスナップショットです（タスクの保存操作は不要です）。取得方法が実ブラウザ（fetchMethod=\"browser\"）ではないため、このスナップショットは正典にしません。",
+},
+canonical: false,
+});
+const inserted = await db
+.insert(schema.sourceSnapshots)
+.values({
+kind,
+park,
+targetDate: null,
+url: args.url,
+title: null,
+rawText: args.text,
+batchId: openRun ? `storehouse-run-${openRun.id}` : "storehouse-read",
+fetchMethod: "storehouse",
+canonical: 0,
+completenessNote,
+...(hasSourceDate && sourceFetchedDate
+? { fetchedAt: sourceFetchedDate }
+: {}),
+})
+.returning({ id: schema.sourceSnapshots.id });
+const row = inserted[0];
+if (!row) return null;
+if (kind === "restaurant_detail") {
+await upsertRestaurantLeaves(ctx, [
+{ url: args.url, park, source: "storehouse" as const },
+]);
+}
+ctx.invalidateQueries();
+return row.id;
+} catch {
+// The read's result stands regardless of the save; the
+// caller records that no snapshot was saved.
+return null;
+}
+}
+
+// The decision shape returned by both planAcquisition and
+// submitSitemap (identical by design: a task that carried the
+// sitemap in continues on the returned decision exactly as if
+// planAcquisition had produced it on a fresh plan).
+const planDecisionResponse = z.object({
+park: parkEnum,
+targetDate: z.string(),
+atTime: z.string(),
+planState: z.enum(["fresh", "rebuild"]),
+planCreatedAt: z.string().nullable(),
+skeletonSameAsPrevious: z.boolean().nullable(),
+needsSitemap: z.boolean(),
+nodes: z.array(
+z.object({
+nodeKey: z.string(),
+kinds: z.array(z.string()),
+decision: z.enum(["reuse", "fetch", "skip", "storehouse"]),
+reason: z.string(),
+url: z.string().nullable(),
+operations: z.string().nullable(),
+anchor: z.string(),
+snapshotId: z.number().nullable(),
+snapshotIds: z.array(z.number()),
+snapshotFetchedAt: z.string().nullable(),
+}),
+),
+restaurantLeaves: z.array(
+z.object({
+url: z.string(),
+decision: z.literal("storehouse"),
+}),
+),
+});
+
+// The plan-layer instruction interpolated into every assignment
+// that fetches the canonical source set (generation / same-day /
+// partial replacement / bulk re-verification): register the URL
+// list with the storehouse, call planAcquisition BEFORE fetching,
+// fetch only the nodes it marks fetch (exactly as the node's
+// operations column says), reuse the snapshots it names, build
+// facts from THIS run's material every time, take restaurant
+// details from the storehouse bundle in principle, fall back to
+// the storehouse snapshot only when an own browser fetch failed —
+// and never change the plan mid-run.
+function acquisitionPlanSteps(
+park: "land" | "sea",
+targetDate: string | null,
+): string {
+const dateArg = targetDate?? "対象日（YYYY-MM-DD）";
+return `取得に入る前に、まず次の2つを行うこと。(0) syncStorehouseUrls アクションを呼ぶこと（この回のURL一覧＝固定14件（先頭はサイトマップURL、続いて固定13件）＋レストラン詳細の巡回リストを保管庫へ送る。保管庫は巡回用の保管庫であり、ok=false が返っても取得は止めずに続けること）。(1) planAcquisition アクション（park="${park}"、targetDate="${dateArg}"）を呼び、この回の取得計画を得ること。計画は公式サイトマップから作る木であり、時計は1つ（計画・スナップショットとも有効期間3時間）。planState="rebuild" かつ needsSitemap=true が返った場合は、計画の作り直しにサイトマップのURL集合が必要という合図である（サーバーはサイトマップを自分では取得しない）：まず getStorehouseSitemap アクションを呼び、保管庫が保持するサイトマップのURL集合（日本語ページのみ）を引くこと。urls が返れば、それをそのまま submitSitemap アクション（urls=その配列、park="${park}"、targetDate="${dateArg}"）へ渡し、返ってきた決定（ノードごとの fetch／reuse／storehouse）で取得を進めること。この読み取りの開始／終了と、サイトマップの出所が保管庫であること・保管庫の取得時刻は、サーバーが過程記録に自動で残す（自分で記録してはならない）。getStorehouseSitemap が null を返した（保管庫にまだ無い）場合だけ、従来どおり自分の環境で https://www.tokyodisneyresort.jp/sitemap.xml をプレーンに取得し（実ブラウザではなく通常のHTTP取得でよい）、<loc> のURLを全て抽出して submitSitemap へ渡すこと。保管庫にも無く、自分の環境でもサイトマップが取得できなかった場合は、その旨をこの回の取得記録（失敗の報告・未確認の記録）に必ず開示し、planAcquisition が返した既存の計画の骨格（ノード決定）のまま進めること（計画の作成時刻は進まないため、次の回でも作り直しが試みられる）。実行中に計画（木）を変えてはならない。返却への従い方：(a) decision="fetch" のノードだけを、その url（展開済み）と operations（操作列）のとおりに実ブラウザで取得すること（操作列がこの手順書の汎用的な取得手順と食い違う場合は、操作列を優先する）。取得したページは、他のページを読む前に、1ページごとに直ちに saveSourceSnapshots で保存すること（複数ページ分をまとめて後から保存してはならない）。保存を受けたサーバーが、そのページの読み取り完了をサーバーの時刻で過程記録に書く——それが読み取りの正式な記録であり、保存の時刻の並びが読み取りの進み方になる。ページの読み取りの開始／終了を、過程記録に自分で書いてはならない。(b) decision="reuse" のノードは取得しないこと。その snapshotId（複数あるノードは snapshotIds）のスナップショットが、この回のそのノードの材料である（本文は getSourceSnapshots で読める）。decision="skip" のノードは、その枝がサイトマップに無いため取得しないこと。(b2) decision="storehouse" のノード（レストラン一覧）は、まず getStorehouseSnapshot アクション（url=そのノードの url）で保管庫のスナップショットを引くこと。保管庫にあれば、サーバーが読んだ時点でその本文を fetchMethod="storehouse"・sourceFetchedAt=保管庫の取得時刻つきのスナップショットとして保存する（返却の snapshotId が、この回のそのノードの材料である）。自分で saveSourceSnapshots に保存し直す必要はなく、保存していないことを理由に未確認として記録してはならない。完全性の錨はその本文に対して照合すること。保管庫に無ければ、そのノードの url を operations のとおり実ブラウザで取得すること。(c) ファクト構築（saveNormalizedFacts）は、毎回この回の材料（再利用スナップショットと今回 fetch して保存したスナップショットの集合）から行うこと。過去のファクト構築を再利用して構築を省略してはならない。(d) レストラン詳細ページは保管庫の束が原則である：getStorehouseRestaurants アクションで束を取り、使う店が束にあれば、その本文を saveSourceSnapshots（kind="restaurant_detail"、fetchMethod="storehouse"、sourceFetchedAt=束のその項目の fetchedAt）で保存し、それをファクトの根拠にすること（取得時刻と出所＝保管庫は、そのスナップショットの記録に残る）。束に無い店だけ、従来どおり実ブラウザで開いて取得すること。(e) fetch と判定されたページの自前のブラウザ取得が失敗した場合は、最後の手段として getStorehouseSnapshot アクション（url=そのページのURL）を引くこと。保管庫にあれば、サーバーが読んだ時点でその本文を fetchMethod="storehouse"・sourceFetchedAt=保管庫の取得時刻つきのスナップショットとして保存する（返却の snapshotId が、そのページのこの回の材料である）。自分で saveSourceSnapshots に保存し直す必要はなく、保存していないことを理由に未確認として記録してはならない。完全性の錨はその本文に対して照合すること。保管庫由来の材料を自前のブラウザ取得（fetchMethod="browser"）と偽って記録してはならない。保管庫にも無ければ、従来どおり「取得できなかった」として見える形で扱うこと。(f) 再利用の判定は鮮度（取得から3時間以内）だけであり、正典かどうかは問わない。ただしファクト登録の正典要件は従来どおりであり、再利用材料が正典でないためにファクトの根拠にできない場合は、そのページに限って取得し直してよい（計画の再利用判定は正典ゲートを緩めるものではない）。(g) 取得の失敗は、この回の取得記録（失敗の報告・未確認の記録）に残すこと。計画はその場で書き換えないこと（失敗の記録が、次の作り直しの材料になる）。`;
+}
 
 function buildAssignment(
 c: Conditions,
@@ -4338,14 +5470,14 @@ previousSummary,
 : []),
 `【全体の進め方（取得は辞書→一括取得→保存データから作成）】毎回すべてを最初から取り直すのが遅さの原因なので、この順序を厳守すること。(i) まず施設辞書と前回プラン（作り直しの場合）で足りる静的属性は再利用し、(ii) 不足分だけを一括取得スクリプトでまとめて取り、(iii) 計画は保存済みデータ（辞書＋今回取得して保存したデータ＋日付層の確認結果）から作る。日付で変わる情報（営業時間・休止・ショー時刻）は辞書の対象外で、対象日ごとに毎回確認する。待ち時間の推定材料も毎回新しく取る。`,
 `0. 【施設辞書の確認】最初に getFacilityDictionary アクション（park="${c.park}"）を呼び、このパークの施設辞書を読む。各エントリには静的属性（area、officialUrl、durationMin、lat/lng、hasImage）と鮮度フラグが付いている。レストランのエントリには restaurantFact（その施設の現在のファクト：serviceType＝公式ページのサービスタイプ、reservationType＝予約形態：required（予約必須）／ps（プライオリティ・シーティング対象）／none（予約なし）／unknown（未確認）、mobileOrder＝モバイルオーダー：available（対象）／not_available（対象外）／unknown（未確認）。null は有効なファクトが未登録の状態）も付いている。レストランの分類の根拠はこのファクトだけであり、エントリの reservationType／mobileOrder の値（旧来の辞書の列）は分類には一切使わないこと。coordsUsable=true の座標は無期限で有効なので再照会禁止。staticFresh=true のエリア・公式URL・公式所要時間はそのまま使う。imageFresh=true の施設は写真が辞書にあるので imageUrl を調べ直さない。取得が必要なのは、辞書に無い施設と、期限切れ（staticFresh=false）の属性だけ。ただし restaurantFact が null のレストランは、他の静的属性が新鮮でも、ファクトの登録（手順2d）だけは必要になる。`,
-`1. 公式サイト（${officialTop} を起点に、アトラクション一覧、レストラン一覧、エンターテイメント（ショー/パレード）のページ、対象日のパークカレンダー/休止情報ページ）を実際に開いて読む。営業時間、休止施設、ショー・パレードの開催時刻、ディズニー・プレミアアクセス/プライオリティパス/スタンバイパスの対象施設とルール、チケット制度も、記憶ではなく公式ページの記載で確認すること。【日付層は毎回必須】このうち営業時間・休止・ショー/パレード時刻は対象日で変わる「日付層」の情報で、辞書では代替できない。毎回この手順で確認すること（辞書で足りるのは静的属性だけ）。`,
-`1a. 【検証用データの取得（必須・この回の取得データで検証する）】完成したプランは、保存の直前に「この回に取得した公式データ」と突き合わせて検証される（手順2e）。その材料として、この回に必ず次を取得しておくこと。(i) 【正規化ソース層（必須・この順序を厳守）】${CANONICAL_FETCH_STEPS}まず正典ソース集合を取得し、読む前に saveSourceSnapshots アクションで生テキストのまま保存すること（batchId はこの回の取得を識別する任意の文字列。種別は dpa_page＝DPA案内ページ／facility_list＝施設全一覧（アトラクション＋エンターテイメント）／operations＝対象日の営業時間・休止情報／show_schedule＝公演スケジュール／ticket_prices＝チケット価格／announcements＝告知・ニュース一覧。対象日を持つものは targetDate に対象日を入れる）。次に、保存したスナップショットを読んで正規化ファクトを構築し、saveNormalizedFacts アクションで登録すること。手順は：(a) facility_list スナップショットから母集合（そのパークの全施設名）を読み取る（施設辞書の蓄積分を母集合にしてはいけない）。(b) 母集合の全施設について、DPA状態（対象 eligible／対象外 not_eligible／不明 unknown）、単価（対象時のみ）、適用期間（開始日／終了日。行に付いた「対象期間：2026年11月30日（月）～」のような表記も期間として読み取る）を、根拠スナップショットからの逐語抜粋とともにファクトにする。抜粋は保存したスナップショットの生テキストから一字も変えずに切り取ること（サーバーが逐語一致を機械照合し、単価・期間の日付は抜粋の中に表記が含まれていなければ登録を拒否する）。対象外の根拠は、DPAページに載っていないこと自体は抜粋で示せないので、evidenceKind="universe_listing" として施設全一覧側の「その施設名を含む抜粋」でよい。(c) 判定できない施設は黙って省かず、unknown＋理由で必ず埋める。登録結果に missing（ファクトの無い母集合施設）が返ったら、その施設を unknown＋理由で埋めて再登録し、missing が空＝完全なビルドになるまで繰り返すこと。保存時のDPA照合は、この完全なビルドのファクトだけを根拠に行われる（スナップショット本文からの場当たり的な抽出は一切使われない）。DPAの公式ページ自体が取得できない場合はファクトが作れないので、DPA前提の行は作らないこと（スタンバイで組む）。検証できないDPAを前提にしたプランは保存できない。(ii) 対象日の休止施設の一覧（パークカレンダー/休止情報ページで確認したもの）を控える（operations スナップショットとしても保存すること）。(iii) プランに使うショー/パレードの公式公演時刻（対象日の開催時刻）を控える。これらは記憶で代替してはいけない。取得できなかったものがある場合は、その項目は「未確認」として扱う（手順2e・手順4参照）。`,
+`1. 公式サイト（${officialTop} を起点に、アトラクション一覧、レストラン一覧、エンターテイメント（ショー/パレード）のページ、対象日のパークカレンダー/休止情報ページ）を実際に開いて読む。営業時間、休止施設、ショー・パレードの開催時刻、ディズニー・プレミアアクセス/プライオリティパス/スタンバイパスの対象施設とルール、チケット制度も、記憶ではなく公式ページの記載で確認すること。【日付層は毎回必須】このうち営業時間・休止・ショー/パレード時刻は対象日で変わる「日付層」の情報で、辞書では代替できない。毎回この手順で確認すること（辞書で足りるのは静的属性だけ）。ただし確認のための取得は手順1aの取得計画（立案）に従うこと：再利用と判定された行は取り直さず、そのスナップショットで確認したものとする。`,
+`1a. 【検証用データの取得（必須・この回の取得データで検証する）】完成したプランは、保存の直前に「この回に取得した公式データ」と突き合わせて検証される（手順2e）。その材料として、この回に必ず次を取得しておくこと。(i) 【正規化ソース層（必須・この順序を厳守）】${CANONICAL_FETCH_STEPS}${acquisitionPlanSteps(c.park, c.visitDate)}正典ソース集合のうち、取得計画で fetch と判定されたノードを取得し、読む前に saveSourceSnapshots アクションで生テキストのまま保存すること（batchId はこの回の取得を識別する任意の文字列。種別は dpa_page＝DPA案内ページ／facility_list＝施設全一覧（アトラクション＋エンターテイメント）／operations＝対象日の営業時間・休止情報／show_schedule＝公演スケジュール／ticket_prices＝チケット価格／announcements＝告知・ニュース一覧／monthly_calendar＝月間カレンダー／restaurant_list＝レストラン一覧。対象日を持つものは targetDate に対象日を入れる）。次に、保存したスナップショットと再利用行の指定スナップショットを読んで正規化ファクトを構築し、saveNormalizedFacts アクションで登録すること。手順は：(a) facility_list スナップショットから母集合（そのパークの全施設名）を読み取る（施設辞書の蓄積分を母集合にしてはいけない）。(b) 母集合の全施設について、DPA状態（対象 eligible／対象外 not_eligible／不明 unknown）、単価（対象時のみ）、適用期間（開始日／終了日。行に付いた「対象期間：2026年11月30日（月）～」のような表記も期間として読み取る）を、根拠スナップショットからの逐語抜粋とともにファクトにする。抜粋は保存したスナップショットの生テキストから一字も変えずに切り取ること（サーバーが逐語一致を機械照合し、単価・期間の日付は抜粋の中に表記が含まれていなければ登録を拒否する）。対象外の根拠は、DPAページに載っていないこと自体は抜粋で示せないので、evidenceKind="universe_listing" として施設全一覧側の「その施設名を含む抜粋」でよい。(c) 判定できない施設は黙って省かず、unknown＋理由で必ず埋める。登録結果に missing（ファクトの無い母集合施設）が返ったら、その施設を unknown＋理由で埋めて再登録し、missing が空＝完全なビルドになるまで繰り返すこと。保存時のDPA照合は、この完全なビルドのファクトだけを根拠に行われる（スナップショット本文からの場当たり的な抽出は一切使われない）。DPAの公式ページ自体が取得できない場合はファクトが作れないので、DPA前提の行は作らないこと（スタンバイで組む）。検証できないDPAを前提にしたプランは保存できない。(ii) 対象日の休止施設の一覧（パークカレンダー/休止情報ページで確認したもの）を控える（operations スナップショットとしても保存すること）。(iii) プランに使うショー/パレードの公式公演時刻（対象日の開催時刻）を控える。これらは記憶で代替してはいけない。取得できなかったものがある場合は、その項目は「未確認」として扱う（手順2e・手順4参照）。`,
 `1b. 【待ち時間の推定材料】待ち時間の公式データは存在しないため、次の「待ち時間参考サイト」（第三者が公式の表示待ち時間を記録・集計した民間の実績データ）を実際に開いて読み、候補施設の典型的な待ち水準（平均・最大・平日/休日の目安など）を推定の材料にすること。これは公式情報ではない「推定の材料」であり、公式の確認事項と混同してはいけない。【取得はサイトごとに段階制】各サイトには前回の取得方法が記録されている（下記リスト参照）。記録が「ブラウザ表示で取得できた」サイトは最初からブラウザ表示で開くこと。記録が「静的取得で取得できた」または未記録のサイトは、まずスクリプトによる静的取得（一括取得スクリプトに相乗りさせてよい）で試み、集計データが読めなければブラウザ表示に切り替える。どちらの方法でも取れなかったサイトは、そのサイトなしで推定し、notes に「◯◯は取得できなかったため材料に使えなかった」と明記すること（1サイトの失敗で生成全体を止めない）。実際にどの方法で取れたか（または取れなかったか）は、手順4の waitSourceFetchResults で全サイト分を報告すること（次回の取得方法の記録になる）。待ち時間の読みに使うときは、人気の序列だけでなく、定員・回転の速さ・DPA対象かどうかといった供給側の条件も踏まえ、甘い読み（例: 人気エリアの小型ライドを「待ちが短い」と即断する）にならないよう注意すること。参考サイトが開けない、またはその施設のデータが無い場合は、その旨を前提として読みの幅を広げること。候補にするアトラクションについては、必ず具体的な推定待ち時間（分）を1つ決めること（手順4の estWaitMin）。材料が取れた施設はその集計（平均や曜日・時間帯の傾向）から、取れなかった施設は人気・定員・回転の条件から幅を持って見積もる。待ち時間がほぼ無いと判断できる場合も、推定は「0分」として必ず出すこと（省略は禁止）。`,
 waitRefLines,
 heldCrowd
 ? `1c. 【混雑予想（この日付は決定済み・再利用が必須）】混雑予想は日付（パーク＋来園日）ごとに1回だけ決めるものである。対象日（${c.visitDate ?? "対象日"}）については、既にセット「${heldCrowd.title}」で混雑予想が決定され、保持されている：段階${heldCrowd.level}／5、根拠「${heldCrowd.basis ?? "（根拠の記録なし）"}」。この回は再評価を一切してはならない。その段階をそのまま crowdLevel=${heldCrowd.level} とし、crowdBasis には保持済みの根拠に「先に決定済みの予想を再利用した」旨が辿れる一文を添えて、手順4で savePlanSet に渡すこと。シナリオ分けと混雑係数も、この保持済み段階を土台に組み立てること（自分の評価で段階を置き換えると、その日のプラン全体の前提が生成ごとに揺れてしまう）。`
 : `1c. 【混雑予想の評価（必須）】対象日（${c.visitDate ?? "対象日"}）の予想混雑度を5段階（1＝空いている〜5＝激混み）で評価すること。混雑予想は日付（パーク＋来園日）ごとに1回だけ決めるもので、この回で決めた段階と根拠がその日付の前提として保持され、同じ日付の後の生成では再評価されず再利用される。だからこそ、この回の評価は次の【決定手順の優先順位（厳守）】で決めること。(1) 主軸：外部の混雑予想 — 手順1bの登録済み待ち時間参考サイトをはじめ、混雑予想を公開している情報源が対象日について出している予想（混雑カレンダーの段階・レベル表記など）を実際に開いて読み、5段階に換算したものを主軸とする。(2) 補助：季節統計（曜日・時期＝クリスマス時期、ゴールデンウィーク、夏休み、連休・振替休日等、開催中／開催予定のイベント、過去の同種の日の混雑傾向）と、対象日のチケット価格帯（変動価格制の価格帯は混雑度の目安になる）。補助材料は外部予想の裏付け・微調整にだけ使い、外部予想が取れているのに補助材料だけで段階を決め直してはいけない。過去の混雑データは、手順1bの参考サイトの曜日別・時期別の傾向から読み取ってよい。これはアプリ側の判断であり、利用者に尋ねたり選ばせたりするものではない。評価した段階は crowdLevel、根拠（なぜその段階なのか。主軸とした外部予想と、その段階換算が分かるように）は短い文章で crowdBasis として、手順4で savePlanSet に必ず渡すこと（セットの前提として保存され、画面とPDFに表示される）。調査しても判断材料が取れなかった場合は、無理に段階を付けず crowdLevel／crowdBasis ともに null とし、その旨を notes に書くこと（推測で前提を埋めない）。`,
-`【3プランの混雑シナリオと推定待ち時間への混雑係数（必須）】3プランは、手順1cの混雑予想を土台に、混雑シナリオで分ける（プランごとの優先軸では分けない）。プランA＝激混み前提（予想より混む側：シナリオ段階は予想段階＋1、最大5。実効係数は上限寄りに見込む）、プランB＝やや混み前提（予想どおりの中心：シナリオ段階は予想段階そのもの）、プランC＝思ったより空いてる前提（予想より空く側：シナリオ段階は予想段階−1、最小1。実効係数は低めに見積もる）。各プランの各施設の estWaitMin は、手順1bの材料からの基礎推定に、そのプランのシナリオに応じた係数を掛けて四捨五入した値にすること。段階ごとの係数は「上限」であり、最も混雑の影響を受ける人気アトラクション（ソアリン、アナと雪の女王級）にだけ上限そのものを見込む：段階1→上限×0.8、段階2→×0.9、段階3→×1.0、段階4→×2.5、段階5→×5.0（段階5の根拠：2026年1月6日（火）にソアリンで340分待ちの実績があり、基礎推定の5倍に達しうる）。それ以外の施設には、人気・定員・回転の速さ（需要×供給の考え方）に沿って、そのプランのシナリオ上限以下の実効係数を施設ごとに見積もって掛けること（例：段階5でも回転が速く影響を受けにくい施設なら×1.5程度）。DPA等のパス利用時の待ちにも、その施設の実効係数を同じ考え方で適用すること。実際に掛けた実効係数は、プランごとに施設別で crowdWaitFactors（[{slot: "A"|"B"|"C", name: 施設名, factor: 実効係数}]）として savePlanSet に必ず渡すこと（検証の記録にプラン別に残り、前提表示と合わせて後から追えるようにするため——上限だけが残って、実際に掛けた値が辿れない状態は不可）。手順1cで混雑予想が判断できなかった場合（crowdLevel が null の場合）は、シナリオ分けも係数も使わず、基礎推定のまま3プランを作り、crowdWaitFactors は空にすること。`,
+`【3プランの混雑シナリオと推定待ち時間への混雑係数（必須）】3プランは、手順1cの混雑予想を土台に、混雑シナリオで分ける（プランごとの優先軸では分けない）。プランA＝激混み前提（予想より混む側：シナリオ段階は予想段階＋1、最大5。実効係数は上限寄りに見込む）、プランB＝やや混み前提（予想どおりの中心：シナリオ段階は予想段階そのもの）、プランC＝思ったより空いてる前提（予想より空く側：シナリオ段階は予想段階−1、最小1。実効係数は低めに見積もる）。各プランの各施設の estWaitMin は、手順1bの材料からの基礎推定に、そのプランのシナリオに応じた係数を掛けて四捨五入した値にすること。段階ごとの係数は「上限」であり、最も混雑の影響を受ける人気アトラクション（ソアリン、アナと雪の女王級）にだけ上限そのものを見込む：段階1→上限×0.8、段階2→×0.9、段階3→×1.0、段階4→×2.0、段階5→×5.0（段階5の根拠：2026年1月6日（火）にソアリンで340分待ちの実績があり、基礎推定の5倍に達しうる）。それ以外の施設には、人気・定員・回転の速さ（需要×供給の考え方）に沿って、そのプランのシナリオ上限以下の実効係数を施設ごとに見積もって掛けること（例：段階5でも回転が速く影響を受けにくい施設なら×1.5程度）。DPA等のパス利用時の待ちにも、その施設の実効係数を同じ考え方で適用すること。実際に掛けた実効係数は、プランごとに施設別で crowdWaitFactors（[{slot: "A"|"B"|"C", name: 施設名, factor: 実効係数}]）として savePlanSet に必ず渡すこと（検証の記録にプラン別に残り、前提表示と合わせて後から追えるようにするため——上限だけが残って、実際に掛けた値が辿れない状態は不可）。手順1cで混雑予想が判断できなかった場合（crowdLevel が null の場合）は、シナリオ分けも係数も使わず、基礎推定のまま3プランを作り、crowdWaitFactors は空にすること。`,
 `【移動時間の計算（保存時にサーバーが機械計算する・厳守）】各区間の移動時間は、あなたが見積もるものではない。保存時にサーバーが、連続する2項目の座標（引き継ぎ／施設辞書／あなたが items に入れた座標）間の直線距離から、条件の歩く速さ「${WALKING_SPEED_LABELS[c.walkingSpeed]}」で機械計算し、各項目に travel_min として保存する（画面とPDFに「移動 約◯分」と表示される）。計算式: 直線距離÷歩行速度（ゆっくり55／少しゆっくり70／少し急いで85／急いで100 m/分）×迂回乗率（〜100m ×1.1／100〜300m ×1.2／300〜600m ×1.25／600m〜 ×1.3）。エリアの異なる区間は、下記のエリア間マトリクス（少しゆっくり基準の典型分数を歩く速さで換算したもの）が登録されていれば、距離ベースとマトリクスの大きい方を取る（どちらも「最低でもこれだけかかる」下限だから）。その上で常に×1.2の余裕を掛け、1分単位で切り上げ、最小5分とする。保存時の検証では、間隔が「推定待ち時間＋体験時間（公式所要時間）＋travel_min」以上でなければ保存を拒否される。移動時間や余裕を自分で見積もって間隔を詰めてはいけない——travel_min 自体に余裕が含まれているので、開始時刻の間隔はこの式で決まる下限を前提に組むこと。`,
 areaMatrixLines,
 `・プランで使うエリアペアがマトリクスに無い場合は、保存の前に、ウェブのガイド情報等でそのペアの典型的な徒歩時間を実際に調べて、saveAreaTravelTimes アクション（entries: [{park: "${c.park}", areaA, areaB, minutes（少しゆっくり＝70m/分で歩く前提の典型分数）, sourceTitle, sourceUrl, fetchedAt（今日の日付 ${today}）}]）で登録すること。出典の無い分数や記憶で作った分数は登録してはいけない。調べても分からないペアは登録しない（その区間は距離ベースのみで計算される）。`,
@@ -4362,7 +5494,7 @@ SCOPE_BOUNDARY_STEP,
 ]),
 `2b. 【スケジュールの時刻計算（最重要・厳守）】各項目の開始時刻は、その項目の「推定待ち時間＋体験時間（公式の所要時間）＋次の場所への移動時間（travel_min。上記の【移動時間の計算】の式でサーバーが決める値で、余裕はその中に含まれる）」が、次の項目の開始時刻までに収まるように決めること。travel_min は上記の式で自分でも概算できるので、その概算を下回る間隔は絶対に組まないこと。常に少し余裕を持たせる（詰め込みすぎない）。特にアトラクションは、開始時刻に列へ並び始めてから、待ち→体験→移動を経て次へ着く、という実時間で計算する。禁止例: 11:20開始のアトラクション（推定待ち40分）の次を12:00にする——待ち40分だけで12:00になり、体験時間も移動時間も存在しない。このような「推定待ち時間と矛盾するスケジュール」は絶対に作らない。保存する前に、全プランの隣り合う全ペアについて「次の開始時刻 − この開始時刻 ≧ 推定待ち時間＋体験時間＋travel_min（上記の式で概算したもの）」を検算し、満たさないペアがあれば時刻を直してから保存すること。ディズニー・プレミアアクセス等のパスを使う項目は、パス利用時の待ち（短い方）で見積もってよいが、その場合は passType にパス名を必ず入れること。`,
 `2c. 【プラン別の進捗報告（必須）】プランは必ずA→B→Cの順に1つずつ作ること。各プランの作成を実際に始める前に、進捗報告アクション（updatePlanProgress、planSetId=${planSetId}、slot=そのプランのスロット、status="generating"）を呼ぶこと。これにより画面に「プランA：作成中／プランB：待機／プランC：待機」のように、実態どおりのプラン別進捗が表示される。3プランそろってから最後に savePlanSet でまとめて保存する（保存されたプランは自動的に「完了」になる）。自分から「完了」を報告してはいけない——完了は実際に保存されたプランにだけ付く。`,
-`2d. 【不足分の一括取得（必須・このタスク専用スクリプト）】辞書で足りない静的属性（辞書に無い候補施設の座標・公式URL・エリア・公式所要時間・写真URL、期限切れ属性の取り直し）が必要になったら、その回専用の一括取得スクリプトを作成し、1回の実行でまとめて取得すること（何が要るかは依頼ごとに違うので、スクリプトは使い捨てでよい）。スクリプトには、公式一覧/詳細ページの静的フェッチと、不足座標の Nominatim 照会をまとめて含めること。Nominatim への照会は礼儀として1件ごとに1秒以上の間隔を空けること。ページを1枚ずつ自分のターンで開いていく方式は、まとめて取れるものについては禁止する（日付層の確認や、静的取得で取れなかったページのブラウザ表示による補完は除く）。取得できたら saveFacilities アクション（park="${c.park}"）で辞書に保存し、以降の計画作成は保存済みデータから行うこと。静的フェッチで取れなかった公式ページだけ、ブラウザ表示で開いて補ってよい。【レストランのファクト登録（必須）】プランに使うレストランについては、その施設自身の公式レストラン詳細ページから、根拠つきのファクトをレストラン事実レイヤーに登録すること（分類を施設辞書の列に書く方式は廃止した。行の表示はファクトから導出され、プランの行データに分類は入れない）。手順は DPA と同じ規律で：(i) 詳細ページを開き、読む前に saveSourceSnapshots（kind="restaurant_detail"、park="${c.park}"、fetchMethod は実際の取得方法、completeness は {expectationSource: "none", expectation: "レストラン詳細ページには件数宣言が無いため完全性の期待値は導けない", result: "not_derivable"}）で全文を保存する。(ii) 保存した本文を読んで、saveRestaurantFacts（park="${c.park}"）で {name（公式の施設名）, serviceType（ページのサービスタイプの表記そのまま。無ければ null）, snapshotId, reservation, mobileOrder} を登録する。reservation は {type: "required"（予約必須）／"ps"（プライオリティ・シーティング対象）／"none"（予約の経路なし）／"unknown"（未確認）, evidenceKind, evidence（保存した本文からの逐語抜粋）, unknownReason（unknown のとき必須）}、mobileOrder は {type: "available"（モバイルオーダー対象）／"not_available"（対象外）／"unknown", 同じ形}。肯定分類（required／ps／available）は、分類を裏づける表記を含む抜粋（evidenceKind="excerpt"）でなければ登録できない。否定分類（none／not_available）は原則として不在の根拠（evidenceKind="absence"、evidence は施設名を含む一節）で登録する——詳細ページ全文に予約・モバイルオーダーの存在マーカーが無いことを、サーバーが機械確認する（モバイルオーダーの対象外がページに明記されている場合だけ、その表記を含む抜粋でもよい）。公式の記述から読み取れない項目は "none"／"not_available" に倒さず、必ず "unknown"＋理由で登録すること。分類をラベルや印象から推測で作ってはいけない（例：「ショーレストランだから予約必須」「カウンター式だからモバイルオーダー対象だろう」は禁止——ショーダイニングエリアだけが予約必須で、本体のレストランは予約なし・モバイルオーダー対象、という二重構造の店が実在する）。公式一覧で別エントリとして載っている施設（本体とショーダイニングエリア等）は混ぜずに別々のファクトとし、それぞれ自身の詳細ページを根拠に登録すること。getFacilityDictionary の restaurantFact に有効なファクト（登録から180日以内）がある施設は再利用し、詳細ページの再取得・再登録はしないこと。`,
+`2d. 【不足分の一括取得（必須・このタスク専用スクリプト）】辞書で足りない静的属性（辞書に無い候補施設の座標・公式URL・エリア・公式所要時間・写真URL、期限切れ属性の取り直し）が必要になったら、その回専用の一括取得スクリプトを作成し、1回の実行でまとめて取得すること（何が要るかは依頼ごとに違うので、スクリプトは使い捨てでよい）。スクリプトには、公式一覧/詳細ページの静的フェッチと、不足座標の Nominatim 照会をまとめて含めること。Nominatim への照会は礼儀として1件ごとに1秒以上の間隔を空けること。ページを1枚ずつ自分のターンで開いていく方式は、まとめて取れるものについては禁止する（日付層の確認や、静的取得で取れなかったページのブラウザ表示による補完は除く）。取得できたら saveFacilities アクション（park="${c.park}"）で辞書に保存し、以降の計画作成は保存済みデータから行うこと。静的フェッチで取れなかった公式ページだけ、ブラウザ表示で開いて補ってよい。【レストランのファクト登録（必須）】プランに使うレストランについては、その施設自身の公式レストラン詳細ページから、根拠つきのファクトをレストラン事実レイヤーに登録すること（分類を施設辞書の列に書く方式は廃止した。行の表示はファクトから導出され、プランの行データに分類は入れない）。手順は DPA と同じ規律で：(i) まず保管庫の束（getStorehouseRestaurants）にその店があれば、その本文を saveSourceSnapshots（kind="restaurant_detail"、park="${c.park}"、fetchMethod="storehouse"、sourceFetchedAt＝束のその項目の fetchedAt、completeness は下記と同じ）で保存し、それを根拠にすること。束に無い店だけ、詳細ページを実ブラウザで開き、読む前に saveSourceSnapshots（kind="restaurant_detail"、park="${c.park}"、fetchMethod は実際の取得方法、completeness は {expectationSource: "none", expectation: "レストラン詳細ページには件数宣言が無いため完全性の期待値は導けない", result: "not_derivable"}）で全文を保存する。(ii) 保存した本文を読んで、saveRestaurantFacts（park="${c.park}"）で {name（公式の施設名）, serviceType（ページのサービスタイプの表記そのまま。無ければ null）, snapshotId, reservation, mobileOrder} を登録する。reservation は {type: "required"（予約必須）／"ps"（プライオリティ・シーティング対象）／"none"（予約の経路なし）／"unknown"（未確認）, evidenceKind, evidence（保存した本文からの逐語抜粋）, unknownReason（unknown のとき必須）}、mobileOrder は {type: "available"（モバイルオーダー対象）／"not_available"（対象外）／"unknown", 同じ形}。肯定分類（required／ps／available）は、分類を裏づける表記を含む抜粋（evidenceKind="excerpt"）でなければ登録できない。否定分類（none／not_available）は原則として不在の根拠（evidenceKind="absence"、evidence は施設名を含む一節）で登録する——詳細ページ全文に予約・モバイルオーダーの存在マーカーが無いことを、サーバーが機械確認する（モバイルオーダーの対象外がページに明記されている場合だけ、その表記を含む抜粋でもよい）。公式の記述から読み取れない項目は "none"／"not_available" に倒さず、必ず "unknown"＋理由で登録すること。分類をラベルや印象から推測で作ってはいけない（例：「ショーレストランだから予約必須」「カウンター式だからモバイルオーダー対象だろう」は禁止——ショーダイニングエリアだけが予約必須で、本体のレストランは予約なし・モバイルオーダー対象、という二重構造の店が実在する）。公式一覧で別エントリとして載っている施設（本体とショーダイニングエリア等）は混ぜずに別々のファクトとし、それぞれ自身の詳細ページを根拠に登録すること。getFacilityDictionary の restaurantFact に有効なファクト（登録から180日以内）がある施設は再利用し、詳細ページの再取得・再登録はしないこと。`,
 `2e. 【検証プロセス（保存直前・必須）】3プランが完成したら、savePlanSet を呼ぶ前に、手順1aでこの回に取得した公式データと完成した行を突き合わせて、次の全てを自分で照合すること。savePlanSet 側でも同じ照合が機械的に行われ、通らないプランは保存を拒否される（拒否されたら指摘を直してもう一度呼ぶこと。失敗報告はしない）。(1) DPA対象可否：passType がディズニー・プレミアアクセスの全行が、手順1aで登録した正規化ファクト（完全なビルド）で「対象（eligible）」と記録された施設でなければならない。サーバーはそのファクトだけを根拠に照合するので、対象外（not_eligible）や不明（unknown）の施設へのDPA設定は絶対に置かない。加えて、ファクトに適用期間（開始日／終了日）が記録された施設については、サーバーは来園日時点で有効な対象かどうかも照合する。適用開始日が来園日より後の施設（将来の対象拡大で追加される施設など）や、適用終了日を過ぎた施設には、その来園日にはDPA前提を付けないこと（スタンバイで組む）。どうしても入れたい施設が対象外なら、DPA前提をやめてスタンバイの推定待ち時間で組み直すか、理由を notes に書いて外す。(2) DPA単価（購入した時に計上）：DPA費用は「購入した時」にだけ計上する。DPAを買う購入ごとに購入イベント行（kind: "purchase"）を1行入れ、その行にファクト単価（1名分）を unitPriceJpy として持たせ、さらに purchaseCount として「そのプランでその施設を実際に利用する人数」を必ず持たせること（アトラクションは実際に乗る人数、ショーのDPA鑑賞エリアは実際にそのエリアで鑑賞する人数。全員が利用する場合のみ参加者総数。参加者全員が買う前提で総数を入れてはいけない）。費用内訳のDPA金額は、購入イベント行ごとにファクト単価×対象人数（purchaseCount）を1回ずつ合計した額でなければならない——サーバーも購入インスタンス（施設×購入イベント）単位でファクト単価×対象人数から再計算するので、使用行（アトラクション／ショー行）でも計上して二重に数えたり、自分の書き起こしや記憶の単価（古い料金）で計算すると拒否される（クラス2：DPA費用の計上不一致）。対象人数が無い購入イベント行、対象人数が1未満または参加者総数（大人＋子ども）を超える購入イベント行もクラス2で拒否される。使用行には unitPriceJpy を入れないこと（入れてもサーバーは無視するが、形として入れない）。購入イベント行の単価がファクト単価と異なる場合もクラス2で拒否される。合計（estimatedCostJpy）も内訳の合計と一致させる。(3) 休止・営業時間・公演時刻：各行の施設が対象日の休止一覧に無いこと、各行の時刻が営業時間内であること（開始時刻だけでなく、公式所要時間が分かる行は終了時刻＝開始時刻＋所要時間も、退園時刻と閉園時刻の早い方を超えないこと。超える行はクラス4（営業時間外・終了側）で拒否される。所要時間が分からない行は終了側では判定されない。上限ちょうどに終わる行は範囲内）、ショー/パレードの開始時刻が対象日の公式公演時刻と一致すること。(4) DPA購入順序：公式ルール「次のDPAは、前のDPAの購入から60分後、または前のパスの利用開始時刻の早い方から購入できる」で購入列が成立すること。各DPA行には購入時刻を dpaPurchaseTime として必ず入れる（プラン内に購入時刻が明示される）。(5) 照合できなかった項目（ページ取得失敗など）は、黙って通さず verification.unverified に「◯◯：未確認（理由）」の形で入れること。未確認の項目は notes にも「未確認」と明示される。`,
 `2f. 【未確定要素の扱い（必須）】その回の材料では公式に確認できなかった値を仮定として置く要素（未確定要素）は、理由を添えればプランに入れてよい（未確定であることだけを理由に一律に除外しなくてよい）。対象はショー時刻に限らず、未確定の要素全般である（例：公式スケジュールが未発表の期間のショー公演時刻、対象日の公演時刻が「未定」のショー行、取得できなかった施設の属性値）。ただし、未確定の要素を、印も理由もなく確定したもののように置くことは絶対に禁止する。入れる場合は、その項目に unconfirmedReason（短い理由。例「公式スケジュール未発表」「公演時刻未定」）と unconfirmedNote（なぜ未確定かの説明。分かる場合は公式の掲載予定時期も含める。例「公式のスケジュールがまだ出ていません。翌月分は前月8日ごろに掲載されます」）を必ず入れること（手順4）。画面ではその行に「未確定（理由）」の印が付き、PDFにも載る。検証の記録の未確認リストへの記載は、行に入れた理由・説明からアプリ側が自動で整合させて載せる（行側が正本）ので、verification.unverified に同じ未確定を重ねて書かないこと。【検証ゲートとの関係】公式公演時刻が存在しない（未発表・未定）場合に、未確定として明示したショー行は、公演時刻不一致（クラス5）では拒否されない。逆に、公式公演時刻が存在するのに別の時刻を置いた行は、未確定の印を付けてもクラス5で拒否される——未確定は不一致の言い訳にならない。公演時刻が存在するショーは、必ずその公式時刻に合わせること。`,
 `3. 座標の解決は次の優先順位で行う。(a) 作り直しの引き継ぎ値、(b) 施設辞書（coordsUsable=true のもの）、(c) 手順2dの一括取得スクリプト内での Nominatim 照会。座標検索に使ってよいのは OpenStreetMap の Nominatim（nominatim.openstreetmap.org）だけとする。Overpass API をはじめ、他のジオコーダ・座標取得サービスへ無断で切り替えてはいけない。日本語名で見つからなければ、第10節の固定順序で再試行すること（そのままの形→検索範囲を対象パーク周辺に制限した再照会→機械的な表記ゆれ（記号の正規化・副題を落とした短縮形・英語名））。パーク名やエリア名を施設名に付け足した形は、どの段階でも照会に使ってはならない（再試行もスクリプト内でまとめて行う）。確信を持って引けた場合だけ座標を入れ、Nominatim で引けない項目は座標なし（null）にする。座標を推測で作らないこと。座標が引けなかった施設は、notes にその旨を明記すること（どの施設が座標なしになったか分かるように）。なお座標の最終結果は、保存時にサーバー側でも表記ゆれのバリエーションで Nominatim の再照会が行われて確定し、施設自体がどうしても引けない場合はエリアの代表地点の座標でピンが表示され、その旨が検証の記録に残る。例外として、エリアがパークワイドのショー（花火など）は、施設名で引けた地点がパーク外の橋の上など無関係な場所であることがあるため使われず、座標はサーバーがパークの代表地点（シーはメディテレーニアンハーバー、ランドはワールドバザール）に置き換える（ペイロードや辞書に何が入っていても置き換わる）。notes には照会を試みた事実だけを書き、「座標なしで確定」とは書かないこと。`,
@@ -4719,6 +5851,146 @@ function snapshotMissingNote(missing: string[]): string {
     : "";
 }
 
+// ------------------------------------------------------- condition changes
+//
+// A chat judgement may carry structured condition changes (the
+// conditionChanges field): the condition VALUES the user's
+// instruction changes, with their new values. The server — never
+// the model — applies them to the target set's saved conditions,
+// and verifies twice that they landed: once on the sealed
+// conditions before anything starts, and once on the created set's
+// STORED conditions after the start. A mismatch on either check
+// means NO start (the created set is removed again) and an honest
+// chat notice; rebuilding silently on the original conditions is
+// exactly the failure this machinery exists to prevent.
+
+// Normalizes a raw judgement value: text is trimmed (empty reads as
+// "no change"), times are padded to the "HH:MM" form, and a date or
+// time that does not parse is dropped rather than applied blindly.
+// Returns null when nothing actually changes.
+function normalizeConditionChanges(
+  raw: ConditionChanges | null,
+): ConditionChanges | null {
+  if (!raw) return null;
+  const cleanText = (s: string | null): string | null => {
+    const t = (s ?? "").trim();
+    return t ? t : null;
+  };
+  const cleanDate = (s: string | null): string | null => {
+    const t = cleanText(s);
+    if (!t) return null;
+    return /^\d{4}-\d{2}-\d{2}$/.test(t) &&
+      !Number.isNaN(new Date(`${t}T00:00:00`).getTime())
+      ? t
+      : null;
+  };
+  const cleanTime = (s: string | null): string | null => {
+    const t = cleanText(s);
+    if (!t) return null;
+    const p = padTimeOfDay(t);
+    return p != null && /^\d{2}:\d{2}$/.test(p) ? p : null;
+  };
+  const out: ConditionChanges = {
+    park: raw.park ?? null,
+    visitDate: cleanDate(raw.visitDate),
+    entryTime: cleanTime(raw.entryTime),
+    exitTime: cleanTime(raw.exitTime),
+    budgetJpy: raw.budgetJpy ?? null,
+    adults: raw.adults ?? null,
+    children: raw.children ?? null,
+    childrenAges: cleanText(raw.childrenAges),
+    priority: cleanText(raw.priority),
+    walkingSpeed: raw.walkingSpeed ?? null,
+  };
+  return Object.values(out).some((v) => v != null) ? out : null;
+}
+
+// The target set's saved conditions with the judged changes applied
+// — the conditions a rebuild on changed conditions actually runs
+// with. Fields the judgement did not change keep the set's values.
+function applyConditionChanges(
+  base: Conditions,
+  ch: ConditionChanges,
+): Conditions {
+  return Object.freeze({
+    ...base,
+    park: ch.park ?? base.park,
+    visitDate: ch.visitDate ?? base.visitDate,
+    entryTime: ch.entryTime ?? base.entryTime,
+    exitTime: ch.exitTime ?? base.exitTime,
+    budgetJpy: ch.budgetJpy ?? base.budgetJpy,
+    adults: ch.adults ?? base.adults,
+    children: ch.children ?? base.children,
+    childrenAges: ch.childrenAges ?? base.childrenAges,
+    priority: ch.priority ?? base.priority,
+    walkingSpeed: ch.walkingSpeed ?? base.walkingSpeed,
+  });
+}
+
+// The labels of the changed fields whose value in `conditions` does
+// NOT equal the judged change — the server-side correspondence
+// check between a judgement's changes and the conditions a run
+// actually carries. Empty means every change is reflected.
+function conditionChangeMismatches(
+  conditions: Conditions,
+  ch: ConditionChanges,
+): string[] {
+  const out: string[] = [];
+  if (ch.park != null && conditions.park !== ch.park) out.push("パーク");
+  if (ch.visitDate != null && conditions.visitDate !== ch.visitDate)
+    out.push("日付");
+  if (ch.entryTime != null && padTimeOfDay(conditions.entryTime) !== ch.entryTime)
+    out.push("入園時刻");
+  if (ch.exitTime != null && padTimeOfDay(conditions.exitTime) !== ch.exitTime)
+    out.push("退園時刻");
+  if (ch.budgetJpy != null && conditions.budgetJpy !== ch.budgetJpy)
+    out.push("予算");
+  if (ch.adults != null && conditions.adults !== ch.adults)
+    out.push("大人の人数");
+  if (ch.children != null && conditions.children !== ch.children)
+    out.push("子どもの人数");
+  if (ch.childrenAges != null) {
+    const have = (conditions.childrenAges ?? "").trim();
+    // Snapshot round-trip caveat: childrenAges is stored inside the
+    // 人数 line's parentheses, so a value containing "）" reads back
+    // truncated at that point; a read-back that is a prefix of the
+    // judged value counts as reflected (the app's own seals read it
+    // the same way).
+    if (
+      have === "" ||
+      (have !== ch.childrenAges && !ch.childrenAges.startsWith(have))
+    ) {
+      out.push("子どもの年齢・身長");
+    }
+  }
+  if (ch.priority != null && (conditions.priority ?? "").trim() !== ch.priority)
+    out.push("重視する点");
+  if (ch.walkingSpeed != null && conditions.walkingSpeed !== ch.walkingSpeed)
+    out.push("歩く速さ");
+  return out;
+}
+
+// The judged changes as plain labeled lines (used where the changes
+// themselves are the input to another judgement, e.g. the
+// wheelchair-participant check).
+function conditionChangesToText(ch: ConditionChanges): string {
+  const lines: string[] = [];
+  if (ch.park != null) lines.push(`パーク: ${parkName(ch.park)}`);
+  if (ch.visitDate != null) lines.push(`日付: ${ch.visitDate}`);
+  if (ch.entryTime != null) lines.push(`入園時刻: ${ch.entryTime}`);
+  if (ch.exitTime != null) lines.push(`退園時刻: ${ch.exitTime}`);
+  if (ch.budgetJpy != null)
+    lines.push(`予算: ${ch.budgetJpy.toLocaleString("ja-JP")}円`);
+  if (ch.adults != null) lines.push(`大人の人数: ${ch.adults}人`);
+  if (ch.children != null) lines.push(`子どもの人数: ${ch.children}人`);
+  if (ch.childrenAges != null)
+    lines.push(`子どもの年齢・身長: ${ch.childrenAges}`);
+  if (ch.priority != null) lines.push(`重視する点: ${ch.priority}`);
+  if (ch.walkingSpeed != null)
+    lines.push(`歩く速さ: ${WALKING_SPEED_LABELS[ch.walkingSpeed]}`);
+  return lines.join("\n");
+}
+
 // Chat-triggered plan generation: the START JUDGEMENT belongs to the
 // chat AI, not to a phrase whitelist (user's explicit decision,
 // 2026-11-12). Whether a chat message starts a creation / whole-set
@@ -4797,8 +6069,18 @@ const rebuildTarget =
 rebuildTargetRow && rebuildTargetRow.status === "done"
 ? rebuildTargetRow
 : undefined;
-const c: Conditions = rebuildTarget
-? { ...cIn, park: rebuildTarget.park, visitDate: rebuildTarget.visitDate }
+// The caller's conditions govern — park and visit date included.
+// Every rebuild caller passes conditions derived from the TARGET
+// set's own stored snapshot, with any condition changes the chat
+// judgement returned already applied by the server, so they carry
+// the target's park and date unless a judged change deliberately
+// moved them; the target row only fills a visit date the caller
+// left unset. (This override used to force the target's park/date
+// over the caller's, which would have silently undone a judged
+// date/park change.)
+const c: Conditions =
+rebuildTarget && cIn.visitDate == null
+? { ...cIn, visitDate: rebuildTarget.visitDate }
 : cIn;
 const baseTitle = `${c.visitDate?? "日付未定"} ${parkName(c.park)}`;
 // Same-title tab disambiguation: when plan sets with this title already
@@ -4888,6 +6170,609 @@ dayOf: dayOf != null,
 };
 }
 
+// ------------------------------------------------------- run logs （過程記録）
+//
+// Per-execution process record for the long-running operations
+// (owner's decision, 2026-11-19; see the run_logs schema comment).
+// The server opens a run at every spawn and appends the events it
+// can observe itself (task spawn, per-plan drafting reports via
+// updatePlanProgress, and EVERY save attempt of savePlanSet /
+// savePlanReplacement — its start and its outcome: success, or the
+// refusal's class and reason). Server-executed actions in general
+// are bracketed by the server itself (withServerRunBracket): the
+// storehouse reads and sync, planAcquisition / submitSitemap,
+// saveSourceSnapshots, saveNormalizedFacts, saveRestaurantFacts,
+// saveFacilities, saveAreaTravelTimes and getFacilityDictionary
+// each write their own start/end pair into the open run (nothing
+// when no run is open), so those pairs can neither be forgotten
+// by the task nor recorded twice. The task appends only what the
+// server cannot see, through the recordRunEvent action, following
+// the 【過程記録】 block appended to every long-run assignment:
+// phase boundaries （取得 / ファクト構築 / 調査 / 下書き）, one
+// start/end pair per read that leaves no snapshot (a directly
+// fetched sitemap, wait-time reference sites, crowd-forecast
+// sources), one start/end pair per AI-driven step of its own
+// (labelled). An official page's read is recorded by the server
+// alone: saveSourceSnapshots stamps a 読み取り完了 record
+// (kind + URL, server clock) for each saved page, and the task
+// saves each page immediately after reading it, so the stamps'
+// order is the reading's progress — task-written read times
+// are never the record's basis (measured to disagree with the
+// actual reads, and some used pages had no read record at all). The coverage rule
+// is total: while the task is alive, some labelled step is always
+// in progress — no unlabelled gap may exist between consecutive
+// events. A save refusal NEVER closes the run: the recovery work
+// after it (re-fetching the missing page, re-saving) is recorded
+// into the same run, and the run closes only at the task's true
+// end. Every run is closed exactly once — by the successful save
+// (succeeded), by a failure report or the dead-task watchdog
+// (failed; the reason states the last completed phase, the step
+// in progress, the elapsed time, and the reported reason — or
+// explicitly 理由不明 when nothing was ever reported), by a user
+// cancel (cancelled), or by a retry superseding it (interrupted).
+// A record is never left open and silent — and at close time the
+// server inspects the trail: any fetch / AI step whose start was
+// recorded but whose end never was gets an explicit
+// 「終了の記録なし」 marker note, its interval bounded by the
+// next recorded event's time, so a hole in the record remains
+// visible AS a hole instead of passing unnoticed.
+type RunLogKind = "generation" | "same_day" | "partial";
+type RunLogPhase =
+  | "acquisition"
+  | "fact_build"
+  | "research"
+  | "drafting"
+  | "save_verify";
+type RunLogEventType =
+  | "run_open"
+  | "phase_start"
+  | "phase_end"
+  | "fetch_start"
+  | "fetch_end"
+  | "ai_call_start"
+  | "ai_call_end"
+  | "note"
+  | "run_close";
+
+const RUN_PHASE_LABELS: Record<RunLogPhase, string> = {
+  acquisition: "取得",
+  fact_build: "ファクト構築",
+  research: "調査",
+  drafting: "下書き",
+  save_verify: "保存・検証",
+};
+
+function formatRunElapsed(ms: number): string {
+  const totalSec = Math.max(0, Math.round(ms / 1000));
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return min > 0 ? `${min}分${sec}秒` : `${sec}秒`;
+}
+
+async function appendRunLogEvent(
+  ctx: Ctx,
+  runId: number,
+  ev: {
+    eventType: RunLogEventType;
+    phase?: RunLogPhase | null;
+    label: string;
+    detail?: string | null;
+  },
+): Promise<void> {
+  const db = ctx.db<typeof schema>();
+  await db.insert(schema.runLogEvents).values({
+    runId,
+    eventType: ev.eventType,
+    phase: ev.phase ?? null,
+    label: ev.label,
+    detail: ev.detail ?? null,
+  });
+  // Keep the run row's phase summary in step with the trail:
+  // phase_start moves the current phase, phase_end completes it.
+  if (ev.eventType === "phase_start" && ev.phase) {
+    await db
+      .update(schema.runLogs)
+      .set({ currentPhase: ev.phase })
+      .where(
+        and(eq(schema.runLogs.id, runId), eq(schema.runLogs.status, "open")),
+      );
+  } else if (ev.eventType === "phase_end" && ev.phase) {
+    await db
+      .update(schema.runLogs)
+      .set({ lastCompletedPhase: ev.phase, currentPhase: null })
+      .where(
+        and(eq(schema.runLogs.id, runId), eq(schema.runLogs.status, "open")),
+      );
+  }
+}
+
+// The run a caller is reporting into: for a slot, that slot's open
+// partial run wins; otherwise the set's newest open run. Null when
+// no run is open (a stray or late report — recording must never
+// break the operation it observes, so callers treat null as
+// "nothing to record into").
+async function findOpenRunId(
+  ctx: Ctx,
+  planSetId: number,
+  slot?: "A" | "B" | "C" | null,
+): Promise<number | null> {
+  const db = ctx.db<typeof schema>();
+  if (slot) {
+    const slotRuns = await db
+      .select({ id: schema.runLogs.id })
+      .from(schema.runLogs)
+      .where(
+        and(
+          eq(schema.runLogs.planSetId, planSetId),
+          eq(schema.runLogs.status, "open"),
+          eq(schema.runLogs.kind, "partial"),
+          eq(schema.runLogs.slot, slot),
+        ),
+      )
+      .orderBy(desc(schema.runLogs.id))
+      .limit(1);
+    if (slotRuns[0]) return slotRuns[0].id;
+  }
+  const runs = await db
+    .select({ id: schema.runLogs.id })
+    .from(schema.runLogs)
+    .where(
+      and(
+        eq(schema.runLogs.planSetId, planSetId),
+        eq(schema.runLogs.status, "open"),
+      ),
+    )
+    .orderBy(desc(schema.runLogs.id))
+    .limit(1);
+  return runs[0]?.id ?? null;
+}
+
+// The task-manager target a run log belongs to (the manager's
+// completion hook keys on it): a whole-set generation log maps
+// to the generation target, a same-day log to the same-day
+// target, a partial log to its slot's partial target.
+function mgrTargetForRunLog(run: {
+  planSetId: number;
+  kind: string;
+  slot: string | null;
+}): MgrTarget | null {
+  if (run.kind === "generation") {
+    return { type: "generation", planSetId: run.planSetId };
+  }
+  if (run.kind === "same_day") {
+    return { type: "same_day", planSetId: run.planSetId };
+  }
+  if (
+    run.kind === "partial" &&
+    (run.slot === "A" || run.slot === "B" || run.slot === "C")
+  ) {
+    return { type: "partial", planSetId: run.planSetId, slot: run.slot };
+  }
+  return null;
+}
+
+// Closes a run exactly once (an already-closed run is untouched).
+// The close reason is composed HERE from the event trail — last
+// completed phase, the step still in progress (the newest start
+// event with no matching end), the elapsed time, and the given
+// reason — so every failure record answers "where, inside which
+// call, and why" in one line, with 理由不明 stated outright when
+// no reason was reported.
+//
+// The optional mgr flag is the task manager's completion hook:
+// closes that are the processing's NORMAL completion (a save's
+// success, a failure / impossibility report — the task finished
+// its work and its word is already on its surface) pass
+// "finished"; a user cancel passes "cancelled". Watchdog /
+// sweep / supersede closes pass nothing — a silently dead task
+// must stay the manager's to retry, never be mistaken for
+// finished.
+async function closeRunLog(
+  ctx: Ctx,
+  runId: number,
+  outcome: "succeeded" | "failed" | "cancelled" | "interrupted",
+  reason: string | null,
+  mgr?: "finished" | "cancelled" | null,
+): Promise<void> {
+  const db = ctx.db<typeof schema>();
+  const runRows = await db
+    .select()
+    .from(schema.runLogs)
+    .where(
+      and(eq(schema.runLogs.id, runId), eq(schema.runLogs.status, "open")),
+    )
+    .limit(1);
+  const run = runRows[0];
+  if (!run) return;
+  const events = await db
+    .select()
+    .from(schema.runLogEvents)
+    .where(eq(schema.runLogEvents.runId, runId))
+    .orderBy(asc(schema.runLogEvents.id));
+  let lastCompleted: string | null = run.lastCompletedPhase;
+  const openStarts: {
+    eventType: string;
+    label: string;
+    phase: string | null;
+    at: Date;
+    index: number;
+  }[] = [];
+  for (let index = 0; index < events.length; index++) {
+    const e = events[index];
+    if (!e) continue;
+    if (e.eventType === "phase_end" && e.phase) {
+      lastCompleted = e.phase;
+    }
+    if (
+      e.eventType === "phase_start" ||
+      e.eventType === "fetch_start" ||
+      e.eventType === "ai_call_start"
+    ) {
+      openStarts.push({
+        eventType: e.eventType,
+        label: e.label,
+        phase: e.phase,
+        at: e.at,
+        index,
+      });
+    } else if (
+      e.eventType === "phase_end" ||
+      e.eventType === "fetch_end" ||
+      e.eventType === "ai_call_end"
+    ) {
+      // Close the newest matching open start. Fetch / AI pairs
+      // share one label by contract （開始と終了で同じ label), but
+      // a phase's start and end labels legitimately differ
+      // （〜の開始 / 〜の終了）, so phases pair by phase key.
+      const endKind =
+        e.eventType === "phase_end"
+          ? "phase_start"
+          : e.eventType === "fetch_end"
+            ? "fetch_start"
+            : "ai_call_start";
+      for (let i = openStarts.length - 1; i >= 0; i--) {
+        const open = openStarts[i];
+        if (!open || open.eventType !== endKind) continue;
+        if (endKind === "phase_start" ? open.phase === e.phase : open.label === e.label) {
+          openStarts.splice(i, 1);
+          break;
+        }
+      }
+    }
+  }
+  const inProgress = openStarts[openStarts.length - 1] ?? null;
+  const closedAt = new Date();
+  const elapsed = formatRunElapsed(closedAt.getTime() - run.startedAt.getTime());
+  const phaseName = (p: string | null): string =>
+    p != null && p in RUN_PHASE_LABELS
+      ? RUN_PHASE_LABELS[p as RunLogPhase]
+      : "（なし）";
+  const inProgressText = inProgress
+    ? `${inProgress.label}${inProgress.phase ? `（フェーズ: ${phaseName(inProgress.phase)}）` : ""}`
+    : "（なし）";
+  const closeReason =
+    outcome === "succeeded"
+      ? `最後に完了したフェーズ: ${phaseName(lastCompleted)}／経過時間: ${elapsed}／結果: 完了`
+      : `最後に完了したフェーズ: ${phaseName(lastCompleted)}／進行中だった段階: ${inProgressText}／経過時間: ${elapsed}／理由: ${reason ?? "理由不明"}`;
+  // Hole marking (owner's rule, 2026-11-19): a fetch / AI step
+  // whose start was recorded but whose end never was must not
+  // remain a silent hole. Before the run_close event, one marker
+  // note per unclosed step states plainly that its end was never
+  // recorded, and bounds the step's interval by the NEXT recorded
+  // event's time (the close time when it was the last event).
+  // Phase starts are not marked: a phase's end is a boundary the
+  // server also moves itself (per-plan progress reports, save
+  // attempts), so an unclosed phase start is not an omission by
+  // the recording side.
+  for (const open of openStarts) {
+    if (open.eventType !== "fetch_start" && open.eventType !== "ai_call_start") {
+      continue;
+    }
+    const next = events[open.index + 1] ?? null;
+    const bound = next ? next.at : closedAt;
+    await db.insert(schema.runLogEvents).values({
+      runId,
+      eventType: "note",
+      phase:
+        open.phase != null && open.phase in RUN_PHASE_LABELS
+          ? (open.phase as RunLogPhase)
+          : null,
+      label: `終了の記録なし: ${open.label}`,
+      detail: `開始の記録（${open.at.toISOString()}）はあるが、対応する終了の記録が無かった。この手順の区間は、開始から次の記録の時刻（${bound.toISOString()}）までで区切られる。`,
+    });
+  }
+  await db
+    .update(schema.runLogs)
+    .set({
+      status: "closed",
+      outcome,
+      closedAt,
+      closeReason,
+      lastCompletedPhase: lastCompleted,
+      currentPhase: null,
+    })
+    .where(eq(schema.runLogs.id, runId));
+  await db.insert(schema.runLogEvents).values({
+    runId,
+    eventType: "run_close",
+    phase: null,
+    label:
+      outcome === "succeeded"
+        ? "実行の終了（完了）"
+        : outcome === "failed"
+          ? "実行の終了（失敗）"
+          : outcome === "cancelled"
+            ? "実行の終了（キャンセル）"
+            : "実行の終了（中断）",
+    detail: closeReason,
+  });
+  // 裏タスク管理： a task-driven close is the production
+  // processing's "finished" mark — close the manager's run for
+  // this target to match (see the mgr flag contract above).
+  if (mgr) {
+    const target = mgrTargetForRunLog(run);
+    if (target) await mgrFinishRunForTarget(ctx, target, mgr);
+  }
+}
+
+// Opens the run record for a spawn. Any still-open run for the
+// same set + kind + slot is first closed as interrupted — a retry
+// supersedes it, and the old record must not dangle open: its
+// ending is recorded as what it is (the old task's own ending was
+// never reported, so 理由不明 is stated, not implied).
+async function openRunLog(
+  ctx: Ctx,
+  planSetId: number,
+  kind: RunLogKind,
+  slot: "A" | "B" | "C" | null,
+  openLabel: string,
+): Promise<number> {
+  const db = ctx.db<typeof schema>();
+  const stale = await db
+    .select({ id: schema.runLogs.id })
+    .from(schema.runLogs)
+    .where(
+      and(
+        eq(schema.runLogs.planSetId, planSetId),
+        eq(schema.runLogs.status, "open"),
+        eq(schema.runLogs.kind, kind),
+        slot
+          ? eq(schema.runLogs.slot, slot)
+          : isNull(schema.runLogs.slot),
+      ),
+    );
+  for (const s of stale) {
+    await closeRunLog(
+      ctx,
+      s.id,
+      "interrupted",
+      "新しい実行（リトライ等）が開始されたため、この実行の記録を閉じた。元のタスクの終了理由は報告されなかった（理由不明）。",
+    );
+  }
+  const inserted = await db
+    .insert(schema.runLogs)
+    .values({ planSetId, kind, slot })
+    .returning({ id: schema.runLogs.id });
+  const row = inserted[0];
+  if (!row) throw new Error("openRunLog: insert returned no rows");
+  await appendRunLogEvent(ctx, row.id, {
+    eventType: "run_open",
+    label: openLabel,
+  });
+  return row.id;
+}
+
+// Convenience for the server's own observation points: append an
+// event to the set's open run (slot-aware), doing nothing when no
+// run is open.
+async function recordServerRunEvent(
+  ctx: Ctx,
+  planSetId: number,
+  ev: {
+    eventType: RunLogEventType;
+    phase?: RunLogPhase | null;
+    label: string;
+    detail?: string | null;
+  },
+  slot?: "A" | "B" | "C" | null,
+): Promise<void> {
+  const runId = await findOpenRunId(ctx, planSetId, slot);
+  if (runId == null) return;
+  await appendRunLogEvent(ctx, runId, ev);
+}
+
+async function closeOpenRunLog(
+  ctx: Ctx,
+  planSetId: number,
+  outcome: "succeeded" | "failed" | "cancelled" | "interrupted",
+  reason: string | null,
+  slot?: "A" | "B" | "C" | null,
+  mgr?: "finished" | "cancelled" | null,
+): Promise<void> {
+  const runId = await findOpenRunId(ctx, planSetId, slot);
+  if (runId == null) return;
+  await closeRunLog(ctx, runId, outcome, reason, mgr);
+}
+
+// The currently open run, whichever set it belongs to: the target
+// of the server-side auto-recording below. Server actions carry no
+// planSetId (they are addressed by park / date / URL), so — exactly
+// like the save attempts, which the server brackets itself — a
+// server action called while a run is open records into the newest
+// open run, and records nothing when no run is open.
+async function findAnyOpenRun(
+  ctx: Ctx,
+): Promise<{ id: number; currentPhase: string | null } | null> {
+  const db = ctx.db<typeof schema>();
+  const runs = await db
+    .select({
+      id: schema.runLogs.id,
+      currentPhase: schema.runLogs.currentPhase,
+    })
+    .from(schema.runLogs)
+    .where(eq(schema.runLogs.status, "open"))
+    .orderBy(desc(schema.runLogs.id))
+    .limit(1);
+  return runs[0] ?? null;
+}
+
+// The inside of one page read, as stamped by the reading
+// script's own clock (owner's rule, 2026-11-19): renders the
+// four segment stamps a saveSourceSnapshots call may carry
+// (readTimings) as one process-record detail, with the segment
+// durations computed HERE from those stamps — loading wait
+// (open → load complete), operations (load complete →
+// operations complete), extraction (operations complete, or
+// load complete when the page needed no operations → text
+// extracted) — so the record itself shows which part of the
+// read took the time. Unparseable stamps are stated as such
+// instead of being silently dropped.
+function readSegmentDetail(
+  rt: {
+    openStartedAt: string;
+    loadCompletedAt: string;
+    operationsCompletedAt?: string | null;
+    textExtractedAt: string;
+  } | null,
+): string | null {
+  if (rt == null) return null;
+  const t = (v: string) => new Date(v).getTime();
+  const open = t(rt.openStartedAt);
+  const load = t(rt.loadCompletedAt);
+  const ops =
+    rt.operationsCompletedAt != null ? t(rt.operationsCompletedAt) : null;
+  const extract = t(rt.textExtractedAt);
+  const stamps = `開き始め ${rt.openStartedAt}／読み込み完了 ${rt.loadCompletedAt}／操作完了 ${rt.operationsCompletedAt ?? "（操作なし）"}／文章取り出し ${rt.textExtractedAt}`;
+  if (
+    [open, load, extract, ...(ops != null ? [ops] : [])].some((n) =>
+      Number.isNaN(n),
+    )
+  ) {
+    return `${stamps}（時刻の形式が不正なものがあり、区間の秒数は算出できなかった）`;
+  }
+  const sec = (a: number, b: number) =>
+    Math.max(0, Math.round((b - a) / 1000));
+  const opsPart =
+    ops != null
+      ? `操作完了 ${rt.operationsCompletedAt}（操作 ${sec(load, ops)}秒）`
+      : "操作なし";
+  return `開き始め ${rt.openStartedAt}／読み込み完了 ${rt.loadCompletedAt}（読み込み待ち ${sec(open, load)}秒）／${opsPart}／文章取り出し ${rt.textExtractedAt}（取り出し ${sec(ops ?? load, extract)}秒）`;
+}
+
+// Server-side auto-recording for server-executed actions (owner's
+// rule, 2026-11-19): an action the server itself executes — the
+// storehouse reads and sync, the acquisition-plan calls, and the
+// save actions a task calls (snapshots, fact builds, restaurant
+// facts, facility dictionary, area travel times) — writes its own
+// start/end pair into the open run, the same way savePlanSet /
+// savePlanReplacement already bracket every save attempt. The task
+// no longer records these (its instructions say so), so the pair
+// can neither be forgotten by the task nor recorded twice. The
+// pair's phase follows the run's current phase when one is set
+// (the same action serves several phases — saveRestaurantFacts is
+// called in fact_build and in drafting), falling back to the
+// action's home phase. An end is recorded on EVERY exit — success
+// or throw (the detail then states the error) — and recording
+// itself never breaks the operation it observes: a failed append
+// is swallowed, and if the run later closes with the pair still
+// open, closeRunLog marks the hole explicitly.
+async function withServerRunBracket<T>(
+  ctx: Ctx,
+  spec: {
+    kind: "fetch" | "ai_call";
+    phase: RunLogPhase;
+    label: string;
+    startDetail?: string | null;
+    endDetail?: (result: T) => string | null;
+  },
+  fn: () => Promise<T>,
+): Promise<T> {
+  let run: { id: number; currentPhase: string | null } | null = null;
+  try {
+    run = await findAnyOpenRun(ctx);
+  } catch {
+    run = null;
+  }
+  if (run == null) return fn();
+  const phase: RunLogPhase =
+    run.currentPhase != null && run.currentPhase in RUN_PHASE_LABELS
+      ? (run.currentPhase as RunLogPhase)
+      : spec.phase;
+  const startType = spec.kind === "fetch" ? "fetch_start" : "ai_call_start";
+  const endType = spec.kind === "fetch" ? "fetch_end" : "ai_call_end";
+  try {
+    await appendRunLogEvent(ctx, run.id, {
+      eventType: startType,
+      phase,
+      label: spec.label,
+      detail: spec.startDetail ?? null,
+    });
+  } catch {
+    // Recording must never break the operation it observes.
+  }
+  try {
+    const result = await fn();
+    try {
+      await appendRunLogEvent(ctx, run.id, {
+        eventType: endType,
+        phase,
+        label: spec.label,
+        detail: spec.endDetail ? spec.endDetail(result) : null,
+      });
+    } catch {
+      // Same rule: the operation's result stands.
+    }
+    return result;
+  } catch (e) {
+    try {
+      await appendRunLogEvent(ctx, run.id, {
+        eventType: endType,
+        phase,
+        label: spec.label,
+        detail: `エラーで終了: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    } catch {
+      // Same rule: the original error propagates unchanged.
+    }
+    throw e;
+  }
+}
+
+// The 【過程記録】 block appended to every long-run assignment
+// (generation / same-day / partial): the points at which the task
+// must call recordRunEvent so the trail carries phase boundaries,
+// per-fetch/read start/end, and per-AI-step start/end with labels
+// — for EVERY step of the assignment, including the research steps
+// (wait-time reference reads, crowd-forecast evaluation) and the
+// drafting preparation that used to fall between the fact build
+// and the first plan draft unrecorded. The governing rule is
+// continuity: while the task is alive, exactly one labelled step
+// is in progress at all times, so consecutive events never leave
+// an unlabelled gap. Save attempts are recorded by the server
+// itself inside savePlanSet / savePlanReplacement (start +
+// outcome), and a refusal does not close the run — the task is
+// told to keep recording its recovery work into the same run.
+// Server-executed actions in general are bracketed by the server
+// itself (withServerRunBracket), so this block assigns the task
+// only what the server cannot see — its own AI work and the
+// reads that leave no snapshot — and explicitly forbids
+// task-side pairs for server actions (they would double-record)
+// and for official page reads (the server's save-time stamp is
+// the only record of a read).
+function runLogSteps(planSetId: number, slot: "A" | "B" | "C" | null): string {
+  const slotArg = slot ? `、slot="${slot}"` : "";
+  return [
+    `【過程記録（必須）】この実行の過程は、後から「どこで・どの呼び出しの中で止まったか」を特定できるよう、過程記録に残される。次の時点で recordRunEvent アクション（planSetId=${planSetId}${slotArg}）を呼び、時刻つきの記録を残すこと。記録の呼び出し自体は生成の成否に影響しないが、省略すると止まった箇所が特定できなくなる。推測で記録を埋めてはならない（実際に行った手順だけを記録する）。ただし、サーバー側で実行されるアクション（保管庫の読み取りとURL一覧送信、取得計画の判定とサイトマップ提出、材料スナップショットの保存、ファクト構築、レストランファクト登録、施設辞書の確認と保存、エリア間移動時間の登録、プランの保存・検証）の開始／終了は、サーバーが自動で記録する。自分で記録するのは、AI自身の作業の区切り（下書き・評価・自己検証）と、写しを保存しない読み取り（待ち時間参考サイト・混雑予想の情報源など）だけとし、サーバー側のアクションと公式ページの読み取りについて recordRunEvent を呼んではならない（二重記録になるうえ、読み取りについてはタスクの自己申告は実際の時間と一致せず、正式な記録にならない）。なお、開始だけ書いて終了を書かないまま実行が閉じると、サーバーが閉じる時点で「終了の記録なし」と明記した記録を足す（穴は穴として残る）。開始を書いた手順は、必ず終了まで書くこと。`,
+    `・【継続の原則（最重要）】作業は必ず「開始イベント→その作業→終了イベント」で挟むこと。開始イベントを出していない作業を進めてはならず、終了イベントを出さずに次の作業へ移ってはならない。タスクが生きている限り、常にいずれかのラベル付き手順が「進行中」である状態を保つこと（連続するイベントの間に、ラベルの無い空白区間を作らない）。下記に列挙した以外の作業（エリア間移動時間の調査、座標の追加照会、不足ページの取り直し、材料の読み直し等）も、無記録で進めてはならず、内容が分かる label の ai_call_start/ai_call_end（写しを保存しないサイトの読み取りは fetch_start/fetch_end）で挟むこと（サーバー側のアクションと公式ページの読み取りは、上記のとおりサーバーの記録に一本化される）。`,
+    `・取得フェーズ: 作業の最初に phase_start（phase="acquisition"、label="取得フェーズ開始"）。このフェーズで使うサーバー側のアクション（syncStorehouseUrls、planAcquisition、getStorehouseSitemap、submitSitemap、getStorehouseRestaurants、getStorehouseSnapshot、getFacilityDictionary、saveSourceSnapshots）の開始／終了は、すべてサーバーが自動で記録する（サイトマップの出所が保管庫であることと保管庫の取得時刻も、サーバーの記録の detail に残る）ので、これらについて recordRunEvent を呼んではならない。保管庫にサイトマップが無く、自分の環境で直接取得した場合だけ、その取得を fetch_start/fetch_end（phase="acquisition"、label="サイトマップ取得"）で挟むこと。公式ページの読み取りについては、開始／終了を自分で書いてはならない（タスクが書いた読み取りの開始／終了は実際の読み取り時間と一致しないことが実測で確定しており、正式な記録の根拠にしない）。代わりに、進め方をこうすること：公式ページは、1ページ読んだら、他のページを読む前に、直ちにそのページの写しを saveSourceSnapshots で保存する（複数ページ分を読み終えてから、まとめて保存してはならない）。保存を受けたサーバーが、そのページの「読み取り完了」を、ページの種類・URLとサーバーの時刻で過程記録に自動で書く。それがそのページの読み取りの正式な記録であり、保存の時刻の並びが、そのまま読み取りの進み方になる。読み取りの中の区切り（開き始め／読み込み完了／操作完了／文章取り出し）は、読み取り用スクリプトが自身の時計で記録し、保存時に readTimings として渡すこと——サーバーがその区切りも過程記録に残す（詳細は3段手順の「読み取りの区切りの時刻」）。取得が終わったら phase_end（phase="acquisition"、label="取得フェーズ終了"）。`,
+    `・ファクト構築: 開始時に phase_start（phase="fact_build"、label="ファクト構築開始"）。saveNormalizedFacts と saveRestaurantFacts の開始／終了はサーバーが自動で記録するので、自分で記録してはならない（missing を埋める再登録も同じ）。読み取った内容を解釈・構造化するのにかかった時間は、サーバーが打った「読み取り完了」の記録から、saveNormalizedFacts をサーバーが受けた時刻までの区間として、サーバーの記録だけで測られる（自分の開始／終了の自己申告は、その根拠にならない）。終わったら phase_end（phase="fact_build"、label="ファクト構築終了"）。`,
+    `・調査フェーズ（ファクト構築の後・下書きの前。混雑予想の調査と待ち時間参照の読み取りは、このフェーズで記録する）: 開始時に phase_start（phase="research"、label="調査フェーズ開始"）。待ち時間参考サイトの読み取り（手順1b）は、サイト1件ごとに fetch_start/fetch_end（phase="research"、label=サイト名）で挟むこと（静的取得からブラウザ表示への切り替えも同じ1ペアの中で行い、サイト1件につき1ペアとする）。公式のリアルタイム待ち時間表示を読む場合も、同じ要領で fetch_start/fetch_end（phase="research"、label="公式リアルタイム待ち時間"）で挟む。混雑予想の調査（手順1c・通常生成のみ）では、予想サイト等の情報源の読み取り1件ごとに fetch_start/fetch_end（phase="research"、label=情報源の名前）で挟み、段階の決定そのものは ai_call_start/ai_call_end（phase="research"、label="混雑予想の評価"）で挟むこと。決定済みの混雑予想を再利用する場合は、評価は行わず、その旨を note（phase="research"、label="混雑予想は決定済みを再利用"）で残す。無理ゲート判定（手順1d等）は ai_call_start/ai_call_end（phase="research"、label="無理ゲート判定"）で挟む。終わったら phase_end（phase="research"、label="調査フェーズ終了"）。当日検索・部分差し替えで混雑予想の新規評価が無い場合は、評価の記録は残さず、実際に行った調査（待ち時間の現在値の読み取り・無理ゲート判定）だけを記録すること。`,
+    `・下書き: 開始時に phase_start（phase="drafting"、label="下書き開始"）。下書きの準備（不足分の一括取得スクリプトの作成と実行）は fetch_start/fetch_end（phase="drafting"、label="不足分の一括取得スクリプト"）で挟む。saveFacilities、saveAreaTravelTimes、saveRestaurantFacts の開始／終了はサーバーが自動で記録するので、自分で記録してはならない。プランごとの下書きは、updatePlanProgress の呼び出しと合わせて ai_call_start（phase="drafting"、label="プランAの下書き" のようにプランを特定する）で始め、そのプランの下書きが終わったら ai_call_end（同じ label）。3プラン分（当日検索・部分差し替えは対象プラン分）すべてに残すこと。保存前の自己検証（手順2e等）は ai_call_start/ai_call_end（phase="drafting"、label="保存前の自己検証"）で挟む。保存データの組み立ても下書きフェーズの中で行い、phase_end（phase="drafting"、label="下書き終了"）は savePlanSet / savePlanReplacement を呼ぶ直前に出すこと（phase_end と保存呼び出しの間に作業を挟まない）。`,
+    `・保存・検証: savePlanSet / savePlanReplacement の呼び出しは、試行ごとに開始と結果（成功／拒否のクラスと理由）がサーバー側で自動的に記録される（呼び出し前に自分で記録する必要はない）。保存が拒否されても、この実行の記録は閉じられない。拒否後の回復作業（不足ページの再取得、材料の読み直し、組み直し、再保存）も、上の要領で同じ実行の記録に残し続けること（再取得は fetch_start/fetch_end、読み直しや組み直しは ai_call_start/ai_call_end で挟み、再保存はサーバーが記録する）。回復を無記録で進めてはならない。`,
+    `・失敗して終わる場合は、従来どおり reportPlanFailure / reportPlanReplacementFailure / reportImpossibleRequest で理由を報告すること。記録はサーバーがその理由で閉じる。理由を報告せずに終了してはならない。`,
+  ].join("\n");
+}
+
 // Spawns the generation task for an EXISTING generating plan set
 // (its row, title and conditions snapshot are already in place) and
 // handles a failed spawn exactly like a fresh start: the set is
@@ -4913,10 +6798,16 @@ title: string;
 // (idempotent re-delivery): if a not-actually-dead original also
 // saves, the later save wins and the completion line posts once.
 retrySpawn?: boolean;
+// The task-manager attempt this spawn belongs to, when the
+// manager's retry logic is the caller (mgrRespawnProduction).
+// Absent on a fresh start: this function begins the attempt
+// itself — EVERY production spawn goes through the manager
+// （裏タスク管理クラス）, never directly to spawnTask.
+mgrAttempt?: { runId: number; attemptId: number };
 },
 ): Promise<boolean> {
 const db = ctx.db<typeof schema>();
-const { prevSet, dayOf, changeRequest, title } = opts;
+const { prevSet, dayOf, changeRequest } = opts;
 const waitRefs = await loadWaitTimeSources(ctx);
 const areaMatrix = await loadAreaMatrix(ctx, c.park);
 const areaMatrixLines = areaMatrixLinesFor(areaMatrix);
@@ -4963,38 +6854,58 @@ previousSummary = sections.join("\n");
 const heldCrowd = dayOf
 ? null
 : await findHeldCrowdForecast(ctx, c.park, c.visitDate);
-const spawned = await ctx.agent.spawnTask(
-buildAssignment(c, planSetId, waitRefs, previousSummary, dayOf, changeRequest, areaMatrixLines, heldCrowd),
+const runId = await openRunLog(
+ctx,
+planSetId,
+"generation",
+null,
+opts.retrySpawn
+? "生成タスクの実行を開始（リトライ）"
+: "生成タスクの実行を開始",
+);
+await appendRunLogEvent(ctx, runId, {
+eventType: "ai_call_start",
+phase: "acquisition",
+label: "生成タスクの起動（spawnTask）",
+});
+// 裏タスク管理： the spawn goes through the manager — the
+// attempt is begun here (or handed in by the manager's retry),
+// and a spawn failure is the manager's to retry / exhaust, not
+// this function's to announce: on exhaustion the manager has
+// already put the failure on the set's tab (failed + the common
+// congestion text), so nothing further is written here.
+const att =
+opts.mgrAttempt ??
+(await mgrBeginAttempt(ctx, { type: "generation", planSetId }));
+const spawnOutcome = await mgrSpawnForAttempt(
+ctx,
+att,
+buildAssignment(c, planSetId, waitRefs, previousSummary, dayOf, changeRequest, areaMatrixLines, heldCrowd) +
+"\n\n" +
+runLogSteps(planSetId, null),
 {
 expectsAction: "savePlanSet",
 dedupeKey: opts.retrySpawn
 ? `plan-generation-${planSetId}-retry-${Date.now()}`
 : `plan-generation-${planSetId}`,
-});
-if (!spawned.ok) {
-await db
-.update(schema.planSets)
-.set({
-status: "failed",
-error: `生成タスクを開始できませんでした: ${spawned.error}`,
-progressA: "failed",
-progressB: "failed",
-progressC: "failed",
-})
-.where(eq(schema.planSets.id, planSetId));
-// The acceptance reply already promised a completion notice, so a
-// start that failed must be announced too — otherwise the chat says
-// "started" and then stays silent forever, the exact say/do gap the
-// completion-line rule exists to close.
-await db.insert(schema.messages).values({
-role: "assistant",
-text:
-prevSet
-? `「${title}」の作り直しを開始できませんでした。（対象条件: ${setConditionsSummary({ conditionsSnapshot: conditionsToText(c), park: c.park, visitDate: c.visitDate })}）元のプランはそのまま残っています。少し時間をおいて、もう一度お試しください。`
-: `「${title}」のプラン作成を開始できませんでした。（対象条件: ${setConditionsSummary({ conditionsSnapshot: conditionsToText(c), park: c.park, visitDate: c.visitDate })}）少し時間をおいて、もう一度お試しください。`,
-});
+},
+);
+if (spawnOutcome === "exhausted") {
 ctx.invalidateQueries();
 return false;
+}
+if (spawnOutcome === "spawned") {
+// 過程記録： the spawn start event gets its pair — the trail
+// must never carry a permanently-open start (the in-progress
+// derivation in closeRunLog reads open starts). On "retried" a
+// nested spawn (the manager's retry) opened its own run log and
+// paired its own spawn event; this frame's run log was closed
+// as interrupted by that open, so nothing is appended here.
+await appendRunLogEvent(ctx, runId, {
+eventType: "ai_call_end",
+phase: "acquisition",
+label: "生成タスクの起動（spawnTask）",
+});
 }
 ctx.invalidateQueries();
 return true;
@@ -5093,7 +7004,7 @@ return [
 `【全体の進め方（通常の生成と同じ取得順序を、1プラン分に適用する）】`,
 `0. 【施設辞書の確認】最初に getFacilityDictionary アクション（park="${sd.park}"）を呼び、このパークの施設辞書を読む。coordsUsable=true の座標は無期限で有効なので再照会禁止。staticFresh=true のエリア・公式URL・公式所要時間はそのまま使う。imageFresh=true の施設は写真が辞書にあるので imageUrl を調べ直さない。現在地点の座標も、まず辞書で引くこと。`,
 `1. 公式サイト（${officialTop} を起点に、アトラクション一覧、レストラン一覧、エンターテイメント（ショー/パレード）のページ、本日のパークカレンダー/休止情報ページ）を実際に開いて読む。本日の営業時間、休止施設、ショー・パレードの開催時刻、パスの対象施設とルールは、記憶ではなく公式ページの記載で確認すること。`,
-`1a. 【検証用データの取得（必須・この回の取得データで検証する）】完成したプランは、保存の直前に「この回に取得した公式データ」と突き合わせて検証される。その材料として、この回に必ず次を取得しておくこと。(i) 【正規化ソース層（必須・この順序を厳守）】${CANONICAL_FETCH_STEPS}まず正典ソース集合（DPA案内ページ、施設全一覧＝アトラクション＋エンターテイメント、対象日の営業時間・休止情報、公演スケジュール、チケット価格、告知一覧）を取得し、読む前に saveSourceSnapshots で生テキストのまま保存すること。次に保存したスナップショットを読んで、施設全一覧を母集合として全施設分のDPAファクト（対象／対象外／不明＋理由、単価、適用期間、根拠スナップショットからの逐語抜粋）を構築し、saveNormalizedFacts で登録すること。抜粋は保存した生テキストから一字も変えずに切り取ること（単価と期間の日付は抜粋内に表記が無ければ登録できない。行に付いた「対象期間：2026年11月30日（月）～」のような表記も期間として読み取る）。対象外の根拠は evidenceKind="universe_listing"（施設全一覧側の施設名を含む抜粋）でよい。登録結果の missing が空＝完全なビルドになるまで、欠けた施設を不明＋理由で埋めて再登録すること。保存時のDPA照合はこの完全なビルドのファクトだけが根拠になる。DPAページが取得できない場合はファクトが作れないので、DPA前提の行は作らないこと（スタンバイで組む）。(ii) 本日の休止施設の一覧（operations スナップショットとしても保存すること）。(iii) プランに使うショー/パレードの本日の公式公演時刻。取得できなかったものは「未確認」として扱う。`,
+`1a. 【検証用データの取得（必須・この回の取得データで検証する）】完成したプランは、保存の直前に「この回に取得した公式データ」と突き合わせて検証される。その材料として、この回に必ず次を取得しておくこと。(i) 【正規化ソース層（必須・この順序を厳守）】${CANONICAL_FETCH_STEPS}${acquisitionPlanSteps(sd.park, jstTodayIso())}正典ソース集合（DPA案内ページ、施設全一覧＝アトラクション＋エンターテイメント、対象日の営業時間・休止情報、公演スケジュール、チケット価格、告知一覧）のうち、取得計画で fetch と判定されたノードを取得し、読む前に saveSourceSnapshots で生テキストのまま保存すること。次に保存したスナップショットと再利用ノードの指定スナップショットを読んで、施設全一覧を母集合として全施設分のDPAファクト（対象／対象外／不明＋理由、単価、適用期間、根拠スナップショットからの逐語抜粋）を構築し、saveNormalizedFacts で登録すること。なお当日検索では対象日が当日のため、取得計画はデイリー行（営業時間・休止情報・公演スケジュール）を鮮度に関係なく必ず fetch と判定する。抜粋は保存した生テキストから一字も変えずに切り取ること（単価と期間の日付は抜粋内に表記が無ければ登録できない。行に付いた「対象期間：2026年11月30日（月）～」のような表記も期間として読み取る）。対象外の根拠は evidenceKind="universe_listing"（施設全一覧側の施設名を含む抜粋）でよい。登録結果の missing が空＝完全なビルドになるまで、欠けた施設を不明＋理由で埋めて再登録すること。保存時のDPA照合はこの完全なビルドのファクトだけが根拠になる。DPAページが取得できない場合はファクトが作れないので、DPA前提の行は作らないこと（スタンバイで組む）。(ii) 本日の休止施設の一覧（operations スナップショットとしても保存すること）。(iii) プランに使うショー/パレードの本日の公式公演時刻。取得できなかったものは「未確認」として扱う。`,
 `1b. 【待ち時間の材料＝現在の掲示待ち時間（当日検索の要）】集計の平均・典型的な水準は使わない。その時点で公開されている現在の待ち時間を材料にすること：公式のリアルタイム待ち時間表示と、次の登録済み待ち時間参考サイトの「現在値」を実際に開いて読む。取得はサイトごとの段階制（記録された取得方法から開始し、静的取得→ブラウザ表示）とし、取得できなかったサイトは材料に使えなかった旨を notes に記録すること（waitSourceFetchResults の報告も全サイト分必須）。estimateSources には現在値を実際に読んだサイトを入れること。候補にするアトラクションについては、現在の待ち時間をもとに、必ず具体的な推定待ち時間（分）を1つ決めること（estWaitMin）。待ち時間がほぼ無い場合も「0分」として必ず出すこと（省略は禁止）。なお当日検索では、混雑予想の係数は使わない（現在の掲示値そのものが材料であり、係数を掛けると二重に数えることになる）。savePlanSet の crowdLevel／crowdBasis／crowdWaitFactors は渡さないこと。`,
 waitRefLines,
 `【移動時間の計算（保存時にサーバーが機械計算する・厳守）】各区間の移動時間は、あなたが見積もるものではない。保存時にサーバーが、連続する2項目の座標間の直線距離から、歩く速さ「${WALKING_SPEED_LABELS[sd.walkingSpeed]}」で機械計算し、各項目に travel_min として保存する（画面とPDFに「移動 約◯分」と表示される）。計算式: 直線距離÷歩行速度（ゆっくり55／少しゆっくり70／少し急いで85／急いで100 m/分）×迂回乗率（〜100m ×1.1／100〜300m ×1.2／300〜600m ×1.25／600m〜 ×1.3）。エリアの異なる区間は、下記のエリア間マトリクス（少しゆっくり基準の典型分数を歩く速さで換算したもの）が登録されていれば、距離ベースとマトリクスの大きい方を取る。その上で常に×1.2の余裕を掛け、1分単位で切り上げ、最小5分とする。保存時の検証では、間隔が「推定待ち時間＋体験時間（公式所要時間）＋travel_min」以上でなければ保存を拒否される。先頭の現在地点の項目にも座標を入れるのは、この計算のためである。`,
@@ -5105,7 +7016,7 @@ SCOPE_BOUNDARY_STEP,
 `2. 読んだ公式情報と現在の待ち時間だけを根拠に、指定時刻から閉園までのタイムライン（移動・食事・休憩を含む現実的な順序）を1つ作る。本日休止中の施設は入れない。ショー/パレードは本日の公式開催時刻に合わせる。残り時間に収まる構成にし、詰め込みすぎないこと。`,
 `2b. 【スケジュールの時刻計算（最重要・厳守）】各項目の開始時刻は、その項目の「推定待ち時間＋体験時間（公式の所要時間）＋次の場所への移動時間（travel_min。余裕はその中に含まれる）」が、次の項目の開始時刻までに収まるように決めること。travel_min の概算を下回る間隔は絶対に組まないこと。特に最初の区間は、現在地点の項目（指定時刻）から最初の施設までの travel_min を見込むこと。禁止例: 推定待ち40分のアトラクションの次を40分後に置く（体験時間も移動時間も存在しない）。保存する前に、隣り合う全ペアについて「次の開始時刻 − この開始時刻 ≧ 推定待ち時間＋体験時間＋travel_min」を検算し、満たさないペアがあれば時刻を直してから保存すること。`,
 `2c. 【進捗報告（必須）】プランの作成を実際に始める前に、進捗報告アクション（updatePlanProgress、planSetId=${planSetId}、slot="A"、status="generating"）を呼ぶこと。当日検索はプランAの1件だけなので、報告もAだけ行う。保存は savePlanSet で行い、保存された時点で「完了」になる。自分から「完了」を報告してはいけない。`,
-`2d. 【不足分の一括取得】辞書で足りない静的属性（候補施設や現在地点の座標・公式URL・エリア・公式所要時間・写真URL）が必要になったら、その回専用の一括取得スクリプトを作成し、1回の実行でまとめて取得すること（公式一覧/詳細ページの静的フェッチと、不足座標の Nominatim 照会を含む。Nominatim への照会は1件ごとに1秒以上の間隔を空ける）。取得できたら saveFacilities アクション（park="${sd.park}"）で辞書に保存すること。レストランについては、分類を辞書の列に書かず、その施設自身の公式レストラン詳細ページを saveSourceSnapshots（kind="restaurant_detail"、park="${sd.park}"、completeness は {expectationSource: "none", expectation: "レストラン詳細ページには件数宣言が無いため完全性の期待値は導けない", result: "not_derivable"}）で全文保存してから、saveRestaurantFacts（park="${sd.park}"）で根拠つきファクトとして登録すること：reservation は {type: "required"（予約必須）／"ps"（プライオリティ・シーティング対象）／"none"（予約の経路なし）／"unknown"（未確認＋理由）, evidenceKind, evidence（保存した本文からの逐語抜粋）}、mobileOrder は {type: "available"（対象）／"not_available"（対象外）／"unknown"（未確認＋理由）, 同じ形}、serviceType はページのサービスタイプの表記そのまま。肯定分類は裏づけ表記を含む抜粋（evidenceKind="excerpt"）でのみ登録でき、否定分類は原則として不在の根拠（evidenceKind="absence"、evidence は施設名を含む一節。全文に存在マーカーが無いことをサーバーが機械確認する）で登録する。読み取れない項目は "none"／"not_available" に倒さず必ず "unknown"＋理由とし、分類をラベルから推測で作らないこと（ショーダイニングエリアだけが予約必須で本体は予約なし、という二重構造の店がある。公式一覧で別エントリの施設は別々のファクトにすること）。getFacilityDictionary の restaurantFact に有効なファクトがある施設は再利用してよい。`,
+`2d. 【不足分の一括取得】辞書で足りない静的属性（候補施設や現在地点の座標・公式URL・エリア・公式所要時間・写真URL）が必要になったら、その回専用の一括取得スクリプトを作成し、1回の実行でまとめて取得すること（公式一覧/詳細ページの静的フェッチと、不足座標の Nominatim 照会を含む。Nominatim への照会は1件ごとに1秒以上の間隔を空ける）。取得できたら saveFacilities アクション（park="${sd.park}"）で辞書に保存すること。レストランについては、分類を辞書の列に書かず、まず保管庫の束（getStorehouseRestaurants）にある店はその本文を fetchMethod="storehouse"・sourceFetchedAt＝束の取得時刻で saveSourceSnapshots に保存して根拠にし、束に無い店だけ、その施設自身の公式レストラン詳細ページを実ブラウザで開いて saveSourceSnapshots（kind="restaurant_detail"、park="${sd.park}"、completeness は {expectationSource: "none", expectation: "レストラン詳細ページには件数宣言が無いため完全性の期待値は導けない", result: "not_derivable"}）で全文保存してから、saveRestaurantFacts（park="${sd.park}"）で根拠つきファクトとして登録すること：reservation は {type: "required"（予約必須）／"ps"（プライオリティ・シーティング対象）／"none"（予約の経路なし）／"unknown"（未確認＋理由）, evidenceKind, evidence（保存した本文からの逐語抜粋）}、mobileOrder は {type: "available"（対象）／"not_available"（対象外）／"unknown"（未確認＋理由）, 同じ形}、serviceType はページのサービスタイプの表記そのまま。肯定分類は裏づけ表記を含む抜粋（evidenceKind="excerpt"）でのみ登録でき、否定分類は原則として不在の根拠（evidenceKind="absence"、evidence は施設名を含む一節。全文に存在マーカーが無いことをサーバーが機械確認する）で登録する。読み取れない項目は "none"／"not_available" に倒さず必ず "unknown"＋理由とし、分類をラベルから推測で作らないこと（ショーダイニングエリアだけが予約必須で本体は予約なし、という二重構造の店がある。公式一覧で別エントリの施設は別々のファクトにすること）。getFacilityDictionary の restaurantFact に有効なファクトがある施設は再利用してよい。`,
 `2e. 【検証プロセス（保存直前・必須）】プランが完成したら、savePlanSet を呼ぶ前に、手順1aで取得した公式データと完成した行を突き合わせて照合すること。savePlanSet 側でも同じ照合が機械的に行われ、通らないプランは保存を拒否される（拒否されたら指摘を直してもう一度呼ぶこと。失敗報告はしない）。(1) DPA対象可否：DPA前提の全行が、手順1aで登録した正規化ファクト（完全なビルド）で「対象（eligible）」と記録された施設でなければならない。対象外（not_eligible）や不明（unknown）の施設へのDPA設定は絶対に置かない（スタンバイで組み直すか外す）。加えて、ファクトに適用期間（開始日／終了日）が記録された施設は、本日時点で有効な対象かどうかもサーバーが照合する。適用開始日が今日より後の施設にはDPA前提を付けないこと。(2) DPA単価（購入した時に計上）：DPA費用は「購入した時」にだけ計上する。購入ごとに購入イベント行（kind: "purchase"、unitPriceJpy にファクト単価、purchaseCount に対象人数＝そのプランでその施設を実際に利用する人数。アトラクションは実際に乗る人数、ショーのDPA鑑賞エリアは実際にそのエリアで鑑賞する人数。全員が利用する場合のみ参加者総数${sd.adults + sd.children}名。参加者全員が買う前提で総数を入れてはいけない）を1行入れ、費用内訳のDPA金額は購入イベント行ごとにファクト単価×対象人数を1回ずつ合計した額にすること。使用行では計上しない（使用行に unitPriceJpy は入れない）。購入イベント行の単価がファクトと異なる場合、対象人数が無い・1未満・参加者総数（大人${sd.adults}＋子ども${sd.children}＝${sd.adults + sd.children}名）を超える場合はクラス2で拒否される。(3) 休止・営業時間・公演時刻：各行の施設が本日の休止一覧に無いこと、各行の時刻が本日の営業時間内かつ指定時刻以降であること（公式所要時間が分かる行は終了時刻＝開始時刻＋所要時間も閉園時刻を超えないこと。超える行はクラス4（営業時間外・終了側）で拒否される。閉園ちょうどに終わる行は範囲内）、ショー/パレードの開始時刻が本日の公式公演時刻と一致すること（公式公演時刻が存在しない場合に限り、未確定として理由と説明を行に明示したショー行は例外とする。公演時刻が存在するのに異なる時刻は、未確定の印があっても拒否される）。(4) DPA購入順序：60分ルールで購入列が成立し、各DPA行に購入時刻が入っていること。(5) 照合できなかった項目は verification.unverified に「◯◯：未確認（理由）」の形で入れること。`,
 `3. 座標の解決は (a) 施設辞書（coordsUsable=true のもの）、(b) 手順2dの一括取得スクリプト内での Nominatim 照会 の順で行う。座標検索に使ってよいのは OpenStreetMap の Nominatim（nominatim.openstreetmap.org）だけとする。Overpass API をはじめ、他のジオコーダへ切り替えてはいけない。日本語名で見つからなければ、第10節の固定順序で再試行すること（そのままの形→検索範囲を対象パーク周辺に制限した再照会→機械的な表記ゆれ（記号の正規化・副題を落とした短縮形・英語名））。パーク名やエリア名を施設名に付け足した形は、どの段階でも照会に使ってはならない。確信を持って引けた場合だけ座標を入れ、引けない項目は座標なし（null）にし、その旨を notes に明記すること。座標を推測で作らないこと。エリアがパークワイドのショー（花火など）は、施設名で引けた地点がパーク外の無関係な場所であることがあるため使われず、座標はサーバーがパークの代表地点（シーはメディテレーニアンハーバー、ランドはワールドバザール）に置き換える。`,
 `4. 結果を保存アクション（savePlanSet）に渡す。planSetId は ${planSetId}。factBuildId には、手順1aで登録した完全なファクトビルドの id を必ず入れること（無い／不完全なビルドではDPA前提の行は全て拒否される）。plans は slot が "A" の1件だけを入れること（B・Cを入れてはいけない）。title は「当日プラン（${sd.startTime}から）」のように当日検索と分かる名前にし、summary には現在地点・開始時刻・ご要望への対応が分かるように書くこと。【プランの最低内容（クラス11・厳守）】費用合計と金額入りの内訳を必ず入れ、スケジュールにはアトラクション／ショーの実項目を少なくとも1つ含めること（現在地点と退園などのマーカー行だけの骨組みは不可）。アトラクション行とショー行には推定待ち時間（estWaitMin）を必ず入れること（0分でも入れる）。欠けた提出はクラス11として保存を拒否され、セットが失敗として記録される。タイトルがテスト／仮置きパターン（「テスト」「test」「仮置き」等）に一致するもの、要約が1文字・定型文のみ・空白を除き10文字未満のものもクラス11で拒否される（タイトルは当日検索と分かる実タイトルにし、要約には現在地点・開始時刻・ご要望への対応が分かる実質のある文章を書くこと。当日検索には実項目数の床とチケット代の床は適用されない）。estimatedCostJpy はこれからかかる費用の総額、costBreakdown は内訳の配列（{label, amountJpy, note}。チケット代は含めない。合計は estimatedCostJpy と一致させること。DPAの行の note は、購入ごとに「単価×対象人数」が分かる表記で書くこと（例：「ソアリン 2,500円×2名」のように購入1件ごとに単価と対象人数を並べる）。各 items は回る順に sortOrder 0,1,2... とし、先頭は手順どおり現在地点の項目、続けて timeLabel（例 "15:00"）、name（公式の施設名。先頭の現在地点だけは現在地点の表記そのまま）、kind（attraction/show/parade/restaurant/break/move/other/purchase）、area（公式のエリア名）、note（アトラクションについては公式の所要時間を「所要約◯分」の形で必ず含め、推定待ち時間と分けて書くこと）、passType（使う/狙うパスがあればその名称、なければ null）、dpaPurchaseTime（DPAの項目には購入時刻を必ず入れる。それ以外は null）、unconfirmedReason／unconfirmedNote（公式に確認できなかった値を仮定として置く項目には、短い理由と説明を必ず入れる。例：公演時刻が未定のショー。それ以外の項目は null。未確定の要素を、印も理由もなく確定したもののように置くことは禁止。公式公演時刻が存在するのに異なる時刻を置いた行は、未確定の印を付けてもクラス5で拒否される）【購入イベント行】DPAを使う項目については、その購入のタイミングに購入イベント行を別に1行入れること：kind は "purchase"、name は施設の公式名そのまま、timeLabel と dpaPurchaseTime に購入時刻、passType にパス名、unitPriceJpy にファクト単価（1名分）、purchaseCount に対象人数（そのプランでその施設を実際に利用する人数。アトラクションは実際に乗る人数、ショーのDPA鑑賞エリアは実際にそのエリアで鑑賞する人数。全員が利用する場合のみ参加者総数。必須：無い・1未満・参加者総数超はクラス2で拒否される）。座標（lat/lng）・estWaitMin・imageUrl は入れない（null）。使用行（実際に入るアトラクション／ショー行）には unitPriceJpy を入れない、estWaitMin（アトラクションには必ず入れる。0も有効、省略・null は禁止。パスで入る項目はパス利用時の待ちで見積もる。ただしレストラン行（kind=restaurant）には付けないこと（nullにする）。レストランの待ち時間はモデル化しない（事前に準備してある前提））、lat/lng を含める。具体的な施設に対応する items には officialUrl（実際に開いた公式詳細ページのURLそのもの。開かなかった施設は null）と imageUrl（その施設の公式詳細ページの代表写真の画像URL。確認できなかった項目は null。辞書に写真がある施設は null でよい）を入れること。公式写真が確認できなかった施設は、Wikimedia Commons でその施設本人の写真が見つかれば、幅500px前後のサムネイル画像URL（thumb.wikimedia.org）を referenceUrl に入れてよい。画像URLを推測で作らないこと。sources には実際に読んだ公式ページのタイトルとURLを入れる。estimateSources には、現在の待ち時間の材料として実際に読んだ参考サイトについて {title, url, fetchedAt: 取得日（今日の日付 ${today}）} を入れること。notes には箇条書きで（1項目1行、行頭に「・」を付けない）：当日検索であること（現在地点・指定時刻）、現在の待ち時間を材料にしたことと取得日（今日は ${today}）、材料が取れなかった施設・取得できなかった参考サイトがあればその旨、休止情報や制度上の注意、座標が引けなかった施設があればその旨。parkHours には本日の営業時間（公式表記）を入れる。【検証データ（必須）】verification として、手順1aで実際に取得したデータをそのまま入れること：{fetchedAt: 取得日（今日の日付 ${today}）, dpaSource: DPA案内ページの {title, url}（取得できなければ null）, calendarSource: 休止・営業時間を確認したページの {title, url}, entertainmentSource: 公演時刻を確認したページの {title, url}, dpaSnapshotText: 渡さなくてよい（DPAの照合は正規化ファクトだけで行われる。生テキストは手順1aで source_snapshots に保存済み）, closedFacilities: 本日の休止施設名の配列, showTimes: [{name, times: [...]}] の配列, unverified: 照合できなかった項目の説明の配列（無ければ空配列）}。取得していないデータを推測で入れないこと。【保存時の追加報告（必須）】metrics として {pagesOpened: 実際に開いた/取得したページの総数, phases: [{name, seconds}]} を入れ、waitSourceFetchResults として、登録されている参考サイト全件について {url, method: "script"|"browser"|"failed"} を入れること。`,
@@ -5174,30 +7085,54 @@ generationStartedAt: new Date(),
 const row = inserted[0];
 if (!row) throw new Error("startSameDayGeneration: insert returned no rows");
 const planSetId = row.id;
-await spawnSameDayRun(ctx, planSetId, sd, title);
+await spawnSameDayRun(ctx, planSetId, sd);
 return { planSetId};
 }
 
-// Spawns the 当日検索 task for an EXISTING generating same-day set
-// and handles a failed spawn like a fresh start (set failed + chat
-// announcement). Shared by startSameDayGeneration and
-// retryGeneration (the generating view's リトライ button): a retry
-// re-runs the same assignment from the set's snapshotted inputs.
+// Spawns the 当日検索 task for an EXISTING generating same-day set,
+// through the task manager （裏タスク管理クラス） like every
+// production spawn: a failed spawn is the manager's to retry /
+// exhaust (on exhaustion the failure is already on the set's
+// tab). Shared by startSameDayGeneration and retryGeneration
+// (the generating view's リトライ button): a retry re-runs the
+// same assignment from the set's snapshotted inputs.
 async function spawnSameDayRun(
 ctx: Ctx,
 planSetId: number,
 sd: SameDayInput,
-title: string,
 // A retry spawn gets a fresh dedupe key (see spawnGenerationRun).
 retrySpawn: boolean = false,
+// The task-manager attempt this spawn belongs to, when the
+// manager's retry logic is the caller (mgrRespawnProduction).
+mgrAttempt?: { runId: number; attemptId: number },
 ): Promise<boolean> {
-const db = ctx.db<typeof schema>();
 const waitRefs = await loadWaitTimeSources(ctx);
 const areaMatrixLines = areaMatrixLinesFor(
 await loadAreaMatrix(ctx, sd.park),
 );
-const spawned = await ctx.agent.spawnTask(
-buildSameDayAssignment(sd, planSetId, waitRefs, areaMatrixLines),
+const runId = await openRunLog(
+ctx,
+planSetId,
+"same_day",
+null,
+retrySpawn
+? "当日検索タスクの実行を開始（リトライ）"
+: "当日検索タスクの実行を開始",
+);
+await appendRunLogEvent(ctx, runId, {
+eventType: "ai_call_start",
+phase: "acquisition",
+label: "当日検索タスクの起動（spawnTask）",
+});
+const att =
+mgrAttempt ??
+(await mgrBeginAttempt(ctx, { type: "same_day", planSetId }));
+const spawnOutcome = await mgrSpawnForAttempt(
+ctx,
+att,
+buildSameDayAssignment(sd, planSetId, waitRefs, areaMatrixLines) +
+"\n\n" +
+runLogSteps(planSetId, null),
 {
 expectsAction: "savePlanSet",
 dedupeKey: retrySpawn
@@ -5205,25 +7140,17 @@ dedupeKey: retrySpawn
 : `same-day-search-${planSetId}`,
 },
 );
-if (!spawned.ok) {
-await db
-.update(schema.planSets)
-.set({
-status: "failed",
-error: `生成タスクを開始できませんでした: ${spawned.error}`,
-progressA: "failed",
-progressB: "failed",
-progressC: "failed",
-})
-.where(eq(schema.planSets.id, planSetId));
-// Same rule as startGeneration: a start that failed is announced
-// in the chat, never left silent.
-await db.insert(schema.messages).values({
-role: "assistant",
-text: `「${title}」の当日検索を開始できませんでした。少し時間をおいて、もう一度お試しください。`,
-});
+if (spawnOutcome === "exhausted") {
 ctx.invalidateQueries();
 return false;
+}
+if (spawnOutcome === "spawned") {
+// 過程記録： pair the spawn start event (see spawnGenerationRun).
+await appendRunLogEvent(ctx, runId, {
+eventType: "ai_call_end",
+phase: "acquisition",
+label: "当日検索タスクの起動（spawnTask）",
+});
 }
 ctx.invalidateQueries();
 return true;
@@ -5253,6 +7180,12 @@ type PendingPartialOp = {
   instruction: string;
   dayOfReport: string | null;
   startedAt: number;
+  // Set only when the task manager exhausted this operation's
+  // attempts （裏タスク管理クラス）: the slot stands at 失敗 with
+  // this failure text (the common congestion text), the operation
+  // record kept so the generating view's リトライ re-runs exactly
+  // this request. Absent on a live or never-failed operation.
+  failureText?: string | null;
 };
 
 function parsePendingOps(
@@ -5275,12 +7208,15 @@ function parsePendingOps(
           instruction: string;
           dayOfReport?: unknown;
           startedAt: number;
+          failureText?: unknown;
         };
         out[slot] = {
           instruction: op.instruction,
           dayOfReport:
             typeof op.dayOfReport === "string" ? op.dayOfReport : null,
           startedAt: op.startedAt,
+          failureText:
+            typeof op.failureText === "string" ? op.failureText : null,
         };
       }
     }
@@ -5441,7 +7377,7 @@ currentPlanText,
 `【全体の進め方（全体生成と同じ手順を、プラン${slot}1つ分に適用する）】`,
 `0. 【施設辞書の確認】最初に getFacilityDictionary アクション（park="${c.park}"）を呼び、このパークの施設辞書を読む。coordsUsable=true の座標は再照会禁止。staticFresh=true のエリア・公式URL・公式所要時間はそのまま使う。imageFresh=true の施設は写真が辞書にあるので imageUrl を調べ直さない。`,
 `1. 公式サイト（${officialTop} を起点に、アトラクション一覧、レストラン一覧、エンターテイメント（ショー/パレード）のページ、対象日のパークカレンダー/休止情報ページ）を実際に開いて読む。営業時間、休止施設、ショー・パレードの開催時刻、パスの対象施設とルールは、記憶ではなく公式ページの記載で確認すること（日付層は対象日ごとに毎回確認する）。`,
-`1a. 【検証用データの取得（必須）】保存の直前に、この回に取得した公式データと完成した行が突き合わせて検証される。その材料として、この回に必ず次を取得しておくこと。(i) 【正規化ソース層（必須・この順序を厳守）】${CANONICAL_FETCH_STEPS}まず正典ソース集合（DPA案内ページ、施設全一覧＝アトラクション＋エンターテイメント、対象日の営業時間・休止情報、公演スケジュール、チケット価格、告知一覧）を取得し、読む前に saveSourceSnapshots で生テキストのまま保存すること。次に保存したスナップショットを読んで、施設全一覧を母集合として全施設分のDPAファクト（対象／対象外／不明＋理由、単価、適用期間、根拠スナップショットからの逐語抜粋）を構築し、saveNormalizedFacts で登録すること。抜粋は保存した生テキストから一字も変えずに切り取ること（単価と期間の日付は抜粋内に表記が無ければ登録できない。行に付いた「対象期間：2026年11月30日（月）～」のような表記も期間として読み取る）。対象外の根拠は evidenceKind="universe_listing"（施設全一覧側の施設名を含む抜粋）でよい。登録結果の missing が空＝完全なビルドになるまで、欠けた施設を不明＋理由で埋めて再登録すること。保存時のDPA照合はこの完全なビルドのファクトだけが根拠になる。DPAページが取得できない場合はファクトが作れないので、DPA前提の行は作らないこと（スタンバイで組む）。(ii) 対象日の休止施設の一覧（operations スナップショットとしても保存すること）。(iii) プランに使うショー/パレードの公式公演時刻。取得できなかったものは「未確認」として扱う。`,
+`1a. 【検証用データの取得（必須）】保存の直前に、この回に取得した公式データと完成した行が突き合わせて検証される。その材料として、この回に必ず次を取得しておくこと。(i) 【正規化ソース層（必須・この順序を厳守）】${CANONICAL_FETCH_STEPS}${acquisitionPlanSteps(c.park, c.visitDate)}正典ソース集合（DPA案内ページ、施設全一覧＝アトラクション＋エンターテイメント、対象日の営業時間・休止情報、公演スケジュール、チケット価格、告知一覧）のうち、取得計画で fetch と判定された行を取得し、読む前に saveSourceSnapshots で生テキストのまま保存すること。次に、保存したスナップショットと再利用行の指定スナップショットを読んで、施設全一覧を母集合として全施設分のDPAファクト（対象／対象外／不明＋理由、単価、適用期間、根拠スナップショットからの逐語抜粋）を構築し、saveNormalizedFacts で登録すること。抜粋は保存した生テキストから一字も変えずに切り取ること（単価と期間の日付は抜粋内に表記が無ければ登録できない。行に付いた「対象期間：2026年11月30日（月）～」のような表記も期間として読み取る）。対象外の根拠は evidenceKind="universe_listing"（施設全一覧側の施設名を含む抜粋）でよい。登録結果の missing が空＝完全なビルドになるまで、欠けた施設を不明＋理由で埋めて再登録すること。保存時のDPA照合はこの完全なビルドのファクトだけが根拠になる。DPAページが取得できない場合はファクトが作れないので、DPA前提の行は作らないこと（スタンバイで組む）。(ii) 対象日の休止施設の一覧（operations スナップショットとしても保存すること）。(iii) プランに使うショー/パレードの公式公演時刻。取得できなかったものは「未確認」として扱う。`,
 `1b. 【待ち時間の推定材料】次の「待ち時間参考サイト」を実際に開いて読み、候補施設の典型的な待ち水準を推定の材料にすること（公式情報ではない「推定の材料」）。取得はサイトごとに段階制：記録が「ブラウザ表示で取得できた」サイトは最初からブラウザ表示で開く。記録が「静的取得で取得できた」または未記録のサイトは静的取得から試し、読めなければブラウザ表示に切り替える。どちらの方法でも取れなかったサイトは、そのサイトなしで推定し、その旨を summary か unverified に記録すること（1サイトの失敗で全体を止めない）。実際にどの方法で取れたかは、手順3の waitSourceFetchResults で全サイト分を報告すること。読みに使うときは、人気の序列だけでなく、定員・回転の速さ・DPA対象かどうかといった供給側の条件も踏まえること。候補にするアトラクションについては、必ず具体的な推定待ち時間（分）を1つ決めること（手順3の estWaitMin）。待ち時間がほぼ無いと判断できる場合も「0分」として必ず出すこと（省略は禁止）。`,
 waitRefLines,
 ...(crowdLevel != null && dayOfReport == null
@@ -5455,7 +7391,7 @@ areaMatrixLines,
 `・移動（move）の項目には、移動先の施設・エリアの座標を lat/lng に入れること（移動時間の計算に使う）。座標が引けない施設が絡む区間は移動時間が「未確認」となり、その区間の検証は従来の下限（推定待ち＋10分）で行われ、検証の記録に未確認と残る。`,
 `2. プラン${slot}を作り直す。セット共通の「重視する点」（単一の入力）と、このプランの混雑シナリオ前提に沿い、入園〜退園の時間枠の中で、時刻つきのタイムライン（移動・食事・休憩を含む現実的な順序）にする。対象日に休止中の施設は入れない。ショー/パレードは公式の開催時刻に合わせる（公式の公演時刻が未発表・未定で存在しない期間については、下記の未確定要素の作法——行に理由と説明を付ける——でのみ入れてよい）。概算費用は、パークチケット代を含む1日分の総額（円）とし、内訳（チケット代、有料パス代、食事代の目安、お土産代の目安など）の合計が総額と一致するようにする。`,
 `2b. 【スケジュールの時刻計算（最重要・厳守）】各項目の開始時刻は、その項目の「推定待ち時間＋体験時間（公式の所要時間）＋次の場所への移動時間（travel_min。上記の【移動時間の計算】の式でサーバーが決める値で、余裕はその中に含まれる）」が、次の項目の開始時刻までに収まるように決めること。travel_min は上記の式で自分でも概算できるので、その概算を下回る間隔は絶対に組まないこと。常に少し余裕を持たせる。禁止例: 11:20開始のアトラクション（推定待ち40分）の次を12:00にする——待ち40分だけで12:00になり、体験時間も移動時間も存在しない。このような「推定待ち時間と矛盾するスケジュール」は絶対に作らない。保存する前に、隣り合う全ペアについて「次の開始時刻 − この開始時刻 ≧ 推定待ち時間＋体験時間＋travel_min（上記の式で概算したもの）」を検算し、満たさないペアがあれば時刻を直してから保存すること。パスを使う項目は、パス利用時の待ち（短い方）で見積もってよいが、その場合は passType にパス名を必ず入れること。`,
-`2c. 【座標の解決】優先順位は (a) 差し替え元の引き継ぎ値、(b) 施設辞書（coordsUsable=true のもの）、(c) 不足分の一括取得スクリプト内での Nominatim 照会。座標検索に使ってよいのは OpenStreetMap の Nominatim（nominatim.openstreetmap.org）だけとし、Overpass API をはじめ他のジオコーダへ切り替えてはいけない。日本語名で見つからなければ、第10節の固定順序で再試行すること（そのままの形→検索範囲を対象パーク周辺に制限した再照会→機械的な表記ゆれ（記号の正規化・副題を落とした短縮形・英語名））。パーク名やエリア名を施設名に付け足した形は、どの段階でも照会に使ってはならない。確信を持って引けた場合だけ座標を入れ、引けない項目は座標なし（null）にする。座標を推測で作らないこと。なお座標の最終結果は、保存時にサーバー側でも表記ゆれのバリエーションで Nominatim の再照会が行われて確定し、施設自体がどうしても引けない場合はエリアの代表地点の座標でピンが表示され、その旨が検証の記録に残る。例外として、エリアがパークワイドのショー（花火など）は、施設名で引けた地点がパーク外の橋の上など無関係な場所であることがあるため使われず、座標はサーバーがパークの代表地点（シーはメディテレーニアンハーバー、ランドはワールドバザール）に置き換える（ペイロードや辞書に何が入っていても置き換わる）。summary には「座標なしで確定」とは書かないこと。辞書で足りない静的属性が必要になったら、その回専用の一括取得スクリプトでまとめて取得し、saveFacilities アクション（park="${c.park}"）で辞書に保存すること。レストランについては、分類を辞書の列に書かず、その施設自身の公式レストラン詳細ページを saveSourceSnapshots（kind="restaurant_detail"、park="${c.park}"、completeness は {expectationSource: "none", expectation: "レストラン詳細ページには件数宣言が無いため完全性の期待値は導けない", result: "not_derivable"}）で全文保存してから、saveRestaurantFacts（park="${c.park}"）で根拠つきファクトとして登録すること：reservation は {type: "required"（予約必須）／"ps"（プライオリティ・シーティング対象）／"none"（予約の経路なし）／"unknown"（未確認＋理由）, evidenceKind, evidence（保存した本文からの逐語抜粋）}、mobileOrder は {type: "available"（対象）／"not_available"（対象外）／"unknown"（未確認＋理由）, 同じ形}、serviceType はページのサービスタイプの表記そのまま。肯定分類は裏づけ表記を含む抜粋（evidenceKind="excerpt"）でのみ登録でき、否定分類は原則として不在の根拠（evidenceKind="absence"、evidence は施設名を含む一節。全文に存在マーカーが無いことをサーバーが機械確認する）で登録する。読み取れない項目は "none"／"not_available" に倒さず必ず "unknown"＋理由とし、分類をラベルから推測で作らないこと（ショーダイニングエリアだけが予約必須で本体は予約なし、という二重構造の店がある。公式一覧で別エントリの施設は別々のファクトにすること）。getFacilityDictionary の restaurantFact に有効なファクトがある施設は再利用してよい。`,
+`2c. 【座標の解決】優先順位は (a) 差し替え元の引き継ぎ値、(b) 施設辞書（coordsUsable=true のもの）、(c) 不足分の一括取得スクリプト内での Nominatim 照会。座標検索に使ってよいのは OpenStreetMap の Nominatim（nominatim.openstreetmap.org）だけとし、Overpass API をはじめ他のジオコーダへ切り替えてはいけない。日本語名で見つからなければ、第10節の固定順序で再試行すること（そのままの形→検索範囲を対象パーク周辺に制限した再照会→機械的な表記ゆれ（記号の正規化・副題を落とした短縮形・英語名））。パーク名やエリア名を施設名に付け足した形は、どの段階でも照会に使ってはならない。確信を持って引けた場合だけ座標を入れ、引けない項目は座標なし（null）にする。座標を推測で作らないこと。なお座標の最終結果は、保存時にサーバー側でも表記ゆれのバリエーションで Nominatim の再照会が行われて確定し、施設自体がどうしても引けない場合はエリアの代表地点の座標でピンが表示され、その旨が検証の記録に残る。例外として、エリアがパークワイドのショー（花火など）は、施設名で引けた地点がパーク外の橋の上など無関係な場所であることがあるため使われず、座標はサーバーがパークの代表地点（シーはメディテレーニアンハーバー、ランドはワールドバザール）に置き換える（ペイロードや辞書に何が入っていても置き換わる）。summary には「座標なしで確定」とは書かないこと。辞書で足りない静的属性が必要になったら、その回専用の一括取得スクリプトでまとめて取得し、saveFacilities アクション（park="${c.park}"）で辞書に保存すること。レストランについては、分類を辞書の列に書かず、まず保管庫の束（getStorehouseRestaurants）にある店はその本文を fetchMethod="storehouse"・sourceFetchedAt＝束の取得時刻で saveSourceSnapshots に保存して根拠にし、束に無い店だけ、その施設自身の公式レストラン詳細ページを実ブラウザで開いて saveSourceSnapshots（kind="restaurant_detail"、park="${c.park}"、completeness は {expectationSource: "none", expectation: "レストラン詳細ページには件数宣言が無いため完全性の期待値は導けない", result: "not_derivable"}）で全文保存してから、saveRestaurantFacts（park="${c.park}"）で根拠つきファクトとして登録すること：reservation は {type: "required"（予約必須）／"ps"（プライオリティ・シーティング対象）／"none"（予約の経路なし）／"unknown"（未確認＋理由）, evidenceKind, evidence（保存した本文からの逐語抜粋）}、mobileOrder は {type: "available"（対象）／"not_available"（対象外）／"unknown"（未確認＋理由）, 同じ形}、serviceType はページのサービスタイプの表記そのまま。肯定分類は裏づけ表記を含む抜粋（evidenceKind="excerpt"）でのみ登録でき、否定分類は原則として不在の根拠（evidenceKind="absence"、evidence は施設名を含む一節。全文に存在マーカーが無いことをサーバーが機械確認する）で登録する。読み取れない項目は "none"／"not_available" に倒さず必ず "unknown"＋理由とし、分類をラベルから推測で作らないこと（ショーダイニングエリアだけが予約必須で本体は予約なし、という二重構造の店がある。公式一覧で別エントリの施設は別々のファクトにすること）。getFacilityDictionary の restaurantFact に有効なファクトがある施設は再利用してよい。`,
 `2d. 【検証プロセス（保存直前・必須）】プラン${slot}が完成したら、savePlanReplacement を呼ぶ前に、手順1aでこの回に取得した公式データと完成した行を突き合わせて照合すること。savePlanReplacement 側でも同じ照合が機械的に行われ、通らない場合は保存を拒否される（拒否されたら指摘を直してもう一度呼ぶこと。失敗報告はしない）。(1) DPA対象可否：passType がディズニー・プレミアアクセスの全行が、手順1aで登録した正規化ファクト（完全なビルド）で「対象（eligible）」と記録された施設でなければならない。対象外（not_eligible）や不明（unknown）の施設へのDPA設定は絶対に置かない。加えて、ファクトに適用期間（開始日／終了日）が記録された施設は、来園日時点で有効な対象かどうかもサーバーが照合する。適用開始日が来園日より後の施設には、その来園日にはDPA前提を付けないこと（スタンバイで組み直す）。どうしても入れたい施設が対象外なら、DPA前提をやめてスタンバイの推定待ち時間で組み直す。(2) DPA単価（購入した時に計上）：DPA費用は「購入した時」にだけ計上する。購入ごとに購入イベント行（kind: "purchase"、unitPriceJpy にファクト単価、purchaseCount に対象人数＝そのプランでその施設を実際に利用する人数。アトラクションは実際に乗る人数、ショーのDPA鑑賞エリアは実際にそのエリアで鑑賞する人数。全員が利用する場合のみ参加者総数。参加者全員が買う前提で総数を入れてはいけない）を1行入れ、費用内訳のDPA金額は購入イベント行ごとにファクト単価×対象人数を1回ずつ合計した額にすること。使用行では計上しない（使用行に unitPriceJpy は入れない）。購入イベント行の単価がファクトと異なる場合、対象人数が無い・1未満・参加者総数（大人＋子ども）を超える場合はクラス2で拒否される。(3) 休止・営業時間・公演時刻：各行の施設が対象日の休止一覧に無いこと、各行の時刻が営業時間内であること（開始時刻だけでなく、公式所要時間が分かる行は終了時刻＝開始時刻＋所要時間も、退園時刻と閉園時刻の早い方を超えないこと。超える行はクラス4（営業時間外・終了側）で拒否される。所要時間が分からない行は終了側では判定されない。上限ちょうどに終わる行は範囲内）、ショー/パレードの開始時刻が対象日の公式公演時刻と一致すること。(4) DPA購入順序：公式ルール「次のDPAは、前のDPAの購入から60分後、または前のパスの利用開始時刻の早い方から購入できる」で購入列が成立すること。各DPA行には購入時刻を dpaPurchaseTime として必ず入れる。(5) 照合できなかった項目は、黙って通さず verification.unverified に「◯◯：未確認（理由）」の形で入れること。`,
 SCOPE_BOUNDARY_STEP,
 `2e. 【無理ゲートと融合の原則（必須）】手順1〜1bで材料（公式施設一覧・対象日の運営／休止情報・公演時刻・正規化ファクト）が揃った時点で、起草に入る前に、変更条件と条件の要求が次の固定された無理パターンに当たらないかだけを判定すること：(1) 存在しない（必須の施設・ショーが対象パークの施設一覧に無い、または対象日に休止・公演なしであることが日付層で確定している。確認できないものは断定しない）、(2) 時間の明らかな無理（必須項目を最も緩い前提＝一番空いた側の混雑前提・待ちの下限側・トレードオフを利用者に有利な側へ全部倒して粗く合計しても、入園〜退園・営業時間の枠に収まらない）、(3) 予算の明らかな無理（最小の支出＝チケット代＋必須と明示された有料項目の費用の下限でも予算を超える）、(4) 矛盾した要求（同時刻に2か所、等）。判定は常に楽観側に倒し、トレードオフで救済できるもの（DPAを減らせば収まる、順序を変えれば両立する等）は絶対に弾かず、境界に近ければ通常の生成に進める。パターンはこの固定リストに限る。いずれかに当たれば、起草に入らず、仮の内容も保存せず、reportImpossibleRequest アクション（planSetId と slot、findings: [{category, reason: 「分類の言葉＋具体名＋客観的事実の指摘」までの1〜2文。明確な矛盾は客観的事実そのものを述べてよい（例：同じ時刻に2か所にはいられない）。具体的な改善案・処方箋は、約束の形（「○○を外せば作れます」等の反実仮想）でも提案の形（「どちらか一方を〜するなど」「〜に変更すれば」等）でも書かない}]）を呼んで終了すること（savePlanReplacement も reportPlanReplacementFailure も呼ばない）。起草で要求が全ては両立しない場合は、固定の落とす順序を使わず、要求の強さを言われ方（「絶対」「必ず」の明示・繰り返し・順序指定・詳細さが強い／一度だけの軽い言及は弱い）から読んで、その利用者の価値観に沿う形に融合すること。取り込めなかった要求は、黙って落とさず、理由つきで summary に列挙すること。どう調整しても両立しないことが明確になった場合も、仮の内容を保存せず reportImpossibleRequest で報告すること。`,
@@ -5504,6 +7440,9 @@ startAnnouncement?: string;
 // caller passes the RECORDED request (instruction + dayOfReport)
 // back in, so the re-run is the same operation, not a new decision.
 forceRestart?: boolean;
+// The task-manager attempt this spawn belongs to, when the
+// manager's retry logic is the caller (mgrRespawnProduction).
+mgrAttempt?: { runId: number; attemptId: number };
 } = {},
 ): Promise<{ ok: boolean; alreadyRunning: boolean}> {
 const db = ctx.db<typeof schema>();
@@ -5573,7 +7512,29 @@ const waitRefs = await loadWaitTimeSources(ctx);
 const areaMatrixLines = areaMatrixLinesFor(
 await loadAreaMatrix(ctx, set.park),
 );
-const spawned = await ctx.agent.spawnTask(
+const runId = await openRunLog(
+ctx,
+set.id,
+"partial",
+slot,
+`部分差し替えタスクの実行を開始（プラン${slot}）`,
+);
+await appendRunLogEvent(ctx, runId, {
+eventType: "ai_call_start",
+phase: "acquisition",
+label: "部分差し替えタスクの起動（spawnTask）",
+});
+// 裏タスク管理： the spawn goes through the manager, like every
+// production spawn. A spawn failure is the manager's to retry /
+// exhaust — on exhaustion the manager has already marked the
+// slot failed with the common text (the caller's reply also
+// carries the failure, as before).
+const att =
+opts.mgrAttempt ??
+(await mgrBeginAttempt(ctx, { type: "partial", planSetId: set.id, slot }));
+const spawnOutcome = await mgrSpawnForAttempt(
+ctx,
+att,
 buildPartialAssignment(
 c,
 set.id,
@@ -5586,27 +7547,25 @@ areaMatrixLines,
 opts.dayOfReport ?? null,
 set.crowdLevel,
 set.crowdBasis,
-),
+) +
+"\n\n" +
+runLogSteps(set.id, slot),
 {
 expectsAction: "savePlanReplacement",
 dedupeKey: `plan-partial-${set.id}-${slot}-${Date.now()}`,
 },
 );
-if (!spawned.ok) {
-const clearedOpsJson = pendingOpsJsonWith(pendingOpsJson, slot, null);
-await db
-.update(schema.planSets)
-.set(
-slot === "A"
-? { progressA: "done" as const, progressUpdatedAt: new Date(), pendingOpsJson: clearedOpsJson}
-: slot === "B"
-? { progressB: "done" as const, progressUpdatedAt: new Date(), pendingOpsJson: clearedOpsJson}
-: { progressC: "done" as const, progressUpdatedAt: new Date(), pendingOpsJson: clearedOpsJson},
-)
-.where(eq(schema.planSets.id, set.id));
-// No chat line here: the caller's reply carries the failure (it
-// is saved as the assistant message for this exchange).
+if (spawnOutcome === "exhausted") {
+ctx.invalidateQueries();
 return { ok: false, alreadyRunning: false};
+}
+if (spawnOutcome === "spawned") {
+// 過程記録： pair the spawn start event (see spawnGenerationRun).
+await appendRunLogEvent(ctx, runId, {
+eventType: "ai_call_end",
+phase: "acquisition",
+label: "部分差し替えタスクの起動（spawnTask）",
+});
 }
 // The task has actually started: a caller with no chat exchange of
 // its own (the 「買えなかったら？」 button) gets its start announced
@@ -6257,24 +8216,40 @@ const inserted = await db
 const row = inserted[0];
 if (!row) throw new Error("startResearch: insert returned no rows");
 const researchId = row.id;
+const ok = await spawnResearchAttempt(ctx, researchId, question, c);
+ctx.invalidateQueries();
+return { researchId, ok};
+}
 
-const spawned = await ctx.agent.spawnTask(
+// Spawns the research task for an EXISTING pending research
+// request, through the task manager （裏タスク管理クラス）: the
+// attempt is begun here (or handed in by the manager's retry,
+// which re-runs the SAME request — the request row is created
+// exactly once, by startResearch). A spawn failure is the
+// manager's to retry / exhaust; on exhaustion the manager has
+// already marked the request failed and posted the common
+// congestion text to the chat.
+async function spawnResearchAttempt(
+ctx: Ctx,
+researchId: number,
+question: string,
+c: Conditions,
+mgrAttempt?: { runId: number; attemptId: number },
+): Promise<boolean> {
+const att =
+mgrAttempt ??
+(await mgrBeginAttempt(ctx, { type: "research", researchId }));
+const spawnOutcome = await mgrSpawnForAttempt(
+ctx,
+att,
 buildResearchAssignment(question, c, researchId),
 {
 expectsAction: "saveResearchAnswer",
 dedupeKey: `chat-research-${researchId}`,
 },
 );
-if (!spawned.ok) {
-await db
-.update(schema.researchRequests)
-.set({ status: "failed", completedAt: new Date()})
-.where(eq(schema.researchRequests.id, researchId));
 ctx.invalidateQueries();
-return { researchId, ok: false};
-}
-ctx.invalidateQueries();
-return { researchId, ok: true};
+return spawnOutcome !== "exhausted";
 }
 
 // Assignment for a reference-site list update: the user instructed the
@@ -6333,25 +8308,40 @@ const inserted = await db
 const row = inserted[0];
 if (!row) throw new Error("startWaitSourcesUpdate: insert returned no rows");
 const requestId = row.id;
-const current = await loadWaitTimeSources(ctx);
+const ok = await spawnWaitSourcesAttempt(ctx, requestId, instruction);
+ctx.invalidateQueries();
+return { requestId, ok};
+}
 
-const spawned = await ctx.agent.spawnTask(
+// Spawns the reference-site update task for an EXISTING pending
+// request, through the task manager （裏タスク管理クラス・種類15):
+// the attempt is begun here (or handed in by the manager's
+// retry, which re-runs the SAME request — the request row is
+// created exactly once, by startWaitSourcesUpdate). A spawn
+// failure is the manager's to retry / exhaust; on exhaustion
+// the manager has already marked the request failed and
+// recorded the common congestion text as a dialog notice.
+async function spawnWaitSourcesAttempt(
+ctx: Ctx,
+requestId: number,
+instruction: string,
+mgrAttempt?: { runId: number; attemptId: number},
+): Promise<boolean> {
+const att =
+mgrAttempt ??
+(await mgrBeginAttempt(ctx, { type: "wait_sources", requestId}));
+const current = await loadWaitTimeSources(ctx);
+const spawnOutcome = await mgrSpawnForAttempt(
+ctx,
+att,
 buildWaitSourcesAssignment(instruction, current, requestId),
 {
 expectsAction: "saveWaitTimeSources",
 dedupeKey: `wait-sources-${requestId}`,
 },
 );
-if (!spawned.ok) {
-await db
-.update(schema.waitTimeSourceRequests)
-.set({ status: "failed", completedAt: new Date()})
-.where(eq(schema.waitTimeSourceRequests.id, requestId));
 ctx.invalidateQueries();
-return { requestId, ok: false};
-}
-ctx.invalidateQueries();
-return { requestId, ok: true};
+return spawnOutcome !== "exhausted";
 }
 
 // ---------- bulk re-verification （一括検証） ----------
@@ -6850,7 +8840,7 @@ return [
 planSummary,
 ``,
 `手順:`,
-`1. 公式サイト（${officialTop} を起点に、対象日のパークカレンダー/休止情報ページ、ディズニー・プレミアアクセスの案内ページ、エンターテイメント（ショー/パレード）のページ、チケットの案内ページ、施設全一覧のページ）を実際に開いて読み、来園日について次を取得すること。(i) 営業時間（公式表記そのまま）と、対象日の休止施設の一覧。(ii) 【正規化ソース層】${CANONICAL_FETCH_STEPS}取得した正典ソース（DPA案内ページ、施設全一覧＝アトラクション＋エンターテイメント、対象日の営業時間・休止情報、公演スケジュール、チケット価格、告知一覧）を、読む前に saveSourceSnapshots で生テキストのまま保存し、保存したスナップショットから、施設全一覧を母集合として全施設分のDPAファクト（対象／対象外／不明＋理由、単価、適用期間、根拠スナップショットからの逐語抜粋）を構築して saveNormalizedFacts で登録すること。抜粋は保存した生テキストから一字も変えずに切り取ること（単価と期間の日付は抜粋内に表記が無ければ登録できない。行に付いた「対象期間：2026年11月30日（月）～」のような表記も期間として読み取る）。対象外の根拠は evidenceKind="universe_listing"（施設全一覧側の施設名を含む抜粋）でよい。登録結果の missing が空＝完全なビルドになるまで、欠けた施設を不明＋理由で埋めて再登録すること。再検証のDPA照合はこの新しい完全なビルドのファクトだけが根拠になる。ファクトが作れなかった場合（DPAページが取得できない等）は、factBuildId を渡さないこと（DPAの照合は未確認として記録される）。(iii) 上のプランに含まれるショー/パレードについて、来園日の公式公演時刻。(iv) チケットの現在の単価（案内ページを開いて確認し、出典として sources に含めること）。`,
+`1. ${acquisitionPlanSteps(set.park, set.visitDate)}公式サイト（${officialTop} を起点に、対象日のパークカレンダー/休止情報ページ、ディズニー・プレミアアクセスの案内ページ、エンターテイメント（ショー/パレード）のページ、チケットの案内ページ、施設全一覧のページ）を実際に開いて読み、来園日について次を取得すること（取得計画で reuse と判定されたノードについては開かず、指定スナップショットで確認したものとする）。(i) 営業時間（公式表記そのまま）と、対象日の休止施設の一覧。(ii) 【正規化ソース層】${CANONICAL_FETCH_STEPS}fetch と判定されたノードの正典ソース（DPA案内ページ、施設全一覧＝アトラクション＋エンターテイメント、対象日の営業時間・休止情報、公演スケジュール、チケット価格、告知一覧）を取得し、読む前に saveSourceSnapshots で生テキストのまま保存し、保存したスナップショットと reuse ノードの指定スナップショットから、施設全一覧を母集合として全施設分のDPAファクト（対象／対象外／不明＋理由、単価、適用期間、根拠スナップショットからの逐語抜粋）を構築して saveNormalizedFacts で登録すること。抜粋は保存した生テキストから一字も変えずに切り取ること（単価と期間の日付は抜粋内に表記が無ければ登録できない。行に付いた「対象期間：2026年11月30日（月）～」のような表記も期間として読み取る）。対象外の根拠は evidenceKind="universe_listing"（施設全一覧側の施設名を含む抜粋）でよい。登録結果の missing が空＝完全なビルドになるまで、欠けた施設を不明＋理由で埋めて再登録すること。再検証のDPA照合はこの新しい完全なビルドのファクトだけが根拠になる。ファクトが作れなかった場合（DPAページが取得できない等）は、factBuildId を渡さないこと（DPAの照合は未確認として記録される）。(iii) 上のプランに含まれるショー/パレードについて、来園日の公式公演時刻。(iv) チケットの現在の単価（案内ページを開いて確認し、出典として sources に含めること）。`,
 `2. 取得できなかった項目は、該当欄を空/null にし、verification.unverified に「◯◯：未確認（理由）」の形で入れること。取得していないデータを推測で入れてはいけない（入れれば照合はその偽データで通ってしまう——それが一番悪い）。`,
 `3. 結果を保存アクション（savePlanVerification、requestId=${requestId}、planSetId=${set.id}）に渡すこと。factBuildId には手順1(ii)で登録した新しい完全なファクトビルドの id を入れること（作れなかった場合は渡さない）。parkHours には対象日の営業時間（公式表記）を、sources には実際に読んだ公式ページの {title, url} を入れる。verification として {fetchedAt: 取得日（今日の日付 ${today}）, dpaSource: DPA案内ページの {title, url}（取得できなければ null）, calendarSource: 休止・営業時間を確認したページの {title, url}, entertainmentSource: 公演時刻を確認したページの {title, url}, dpaSnapshotText: 渡さなくてよい（生テキストは source_snapshots に保存済みで、照合はファクトだけで行われる）, closedFacilities: 対象日の休止施設名の配列, showTimes: [{name: ショー/パレード名, times: ["9:40", ...]（来園日の公式公演時刻）}] の配列, unverified: 照合できなかった項目の説明の配列（無ければ空配列）} を入れること。`,
 `4. 公式サイトが全く読めない等で、検証の材料が何も取得できない場合は、失敗報告アクション（reportPlanVerificationFailure、requestId=${requestId}）で理由を伝えること。どちらのアクションも呼ばずに終了しないこと。`,
@@ -6909,6 +8899,40 @@ const row = inserted[0];
 if (!row) throw new Error("startPlanVerification: insert returned no rows");
 const requestId = row.id;
 
+const spawnedOk = await spawnVerificationAttempt(ctx, set, requestId);
+if (!spawnedOk) {
+ctx.invalidateQueries();
+return {
+ok: false,
+error: "一括検証を開始できませんでした。少し時間をおいて、もう一度お試しください。",
+};
+}
+if (announce) {
+await db.insert(schema.messages).values({
+role: "assistant",
+text: `「${set.title}」の一括検証を開始しました。公式情報を取り直して現在のプランと照合します。結果はこのチャットでお知らせします。（プランの内容は変更しません）`,
+});
+}
+ctx.invalidateQueries();
+return { ok: true, requestId, alreadyRunning: false, title: set.title };
+}
+
+// Spawns the verification task for an EXISTING pending
+// verification request, through the task manager
+// （裏タスク管理クラス）: the attempt is begun here (or handed
+// in by the manager's retry, which re-runs the SAME request —
+// the request row is created exactly once, by
+// startPlanVerification). A spawn failure is the manager's to
+// retry / exhaust; on exhaustion the manager has already marked
+// the request failed and posted the common congestion text to
+// the chat.
+async function spawnVerificationAttempt(
+ctx: Ctx,
+set: typeof schema.planSets.$inferSelect,
+requestId: number,
+mgrAttempt?: { runId: number; attemptId: number },
+): Promise<boolean> {
+const db = ctx.db<typeof schema>();
 // A compact picture of what is being verified, so the task knows
 // which shows' times and which facilities to fetch for.
 const planRows = await db
@@ -6933,32 +8957,20 @@ itemRows
 .join("\n"),
 );
 }
-const spawned = await ctx.agent.spawnTask(
+const att =
+mgrAttempt ??
+(await mgrBeginAttempt(ctx, { type: "verification", requestId }));
+const spawnOutcome = await mgrSpawnForAttempt(
+ctx,
+att,
 buildVerificationAssignment(set, requestId, summarySections.join("\n")),
 {
 expectsAction: "savePlanVerification",
 dedupeKey: `plan-verification-${requestId}`,
 },
 );
-if (!spawned.ok) {
-await db
-.update(schema.verificationRequests)
-.set({ status: "failed", completedAt: new Date() })
-.where(eq(schema.verificationRequests.id, requestId));
 ctx.invalidateQueries();
-return {
-ok: false,
-error: "一括検証を開始できませんでした。少し時間をおいて、もう一度お試しください。",
-};
-}
-if (announce) {
-await db.insert(schema.messages).values({
-role: "assistant",
-text: `「${set.title}」の一括検証を開始しました。公式情報を取り直して現在のプランと照合します。結果はこのチャットでお知らせします。（プランの内容は変更しません）`,
-});
-}
-ctx.invalidateQueries();
-return { ok: true, requestId, alreadyRunning: false, title: set.title };
+return spawnOutcome !== "exhausted";
 }
 
 // ---------- verification package （他のAIで2重検証） ----------
@@ -7773,15 +9785,18 @@ throw new Error(
 `saveRestaurantFacts: 「${fact.name}」の根拠スナップショットのパークが一致しません。`,
 );
 }
-// Browser-fetch requirement (owner's rule, 2026-11-18): a restaurant
-// fact may only be grounded in a detail page fetched with a REAL
-// browser (fetchMethod "browser"). A GET / text-extraction text can
-// silently miss the page's expandable content, so it is refused as
-// grounds — re-open the page in the browser, save it again with
-// fetchMethod="browser", and register against that snapshot.
-if (snap.fetchMethod !== "browser") {
+// Browser-grade fetch requirement (owner's rules, 2026-11-18 /
+// 2026-11-19): a restaurant fact may only be grounded in a detail
+// page fetched with a REAL browser — this copy's own browser
+// (fetchMethod "browser") or the storehouse's browser
+// (fetchMethod "storehouse": the Cloudflare storehouse fetched
+// the page with Browser Run; the snapshot's recorded fetchMethod
+// and sourceFetchedAt are the fact's provenance record). A GET /
+// text-extraction text can silently miss the page's expandable
+// content, so anything else is refused as grounds.
+if (snap.fetchMethod !== "browser" && snap.fetchMethod !== "storehouse") {
 throw new Error(
-`saveRestaurantFacts: 「${fact.name}」の根拠スナップショット（id=${fact.snapshotId}）は実ブラウザで取得されていません（fetchMethod="${snap.fetchMethod}"）。レストラン詳細ページは実ブラウザで開いて全文を取得し、fetchMethod="browser" で saveSourceSnapshots に保存し直してから、その snapshotId で登録してください（GET／テキスト抽出で得た本文は根拠にできません）。`,
+`saveRestaurantFacts: 「${fact.name}」の根拠スナップショット（id=${fact.snapshotId}）は実ブラウザ相当で取得されていません（fetchMethod="${snap.fetchMethod}"）。レストラン詳細ページは、実ブラウザで開いて全文を取得し fetchMethod="browser" で保存するか、保管庫の束の本文を fetchMethod="storehouse" で保存してから、その snapshotId で登録してください（GET／テキスト抽出で得た本文は根拠にできません）。`,
 );
 }
 const { errors, reservationMarkers, mobileMarkers } =
@@ -7843,6 +9858,1729 @@ evidence: z.string().min(1).max(4000),
 unknownReason: z.string().max(500).nullable().optional(),
 });
 
+
+// ---------- Task manager （裏タスク管理・検証6, 2026-11-20) ----------
+//
+// The manager class (owner's design): the server side owns ALL
+// control of background tasks and never trusts them. A task gets
+// exactly two kinds of instruction from here — "start" (this
+// spawn) and "cancel" (the attempt is closed server-side; the
+// task is not even told). The evidence that a task started is
+// its FIRST call to its attempt's own record action
+// (recordTaskAttempt). Deadlines are judged from the recorded
+// instants by checkTaskManager (run on a 1-minute schedule and
+// callable on demand):
+// - no first call within the kind's start timeout → the attempt
+//   is closed as cancelled and a new attempt is spawned (retry);
+// - started but not finished within the kind's total timeout →
+//   same;
+// - attempts exhausted → the run closes as "forced"
+//   （試行回数を超えたので強制終了）.
+// A run's final state is only "succeeded" or "forced" (a
+// whole-test cancel is the one other way a run can close, marked
+// "cancelled" with the test itself). All state is in the DB
+// (task_mgr_* tables) — nothing is counted in memory.
+//
+// PRODUCTION INTEGRATION (2026-11-20): the manager is now the
+// ONLY entry point for the app's production background tasks —
+// plan creation (whole-set generation, partial replacement and
+// day-of reschedule: kind 11), same-day search (12), chat
+// research (13) and bulk re-verification (14). No production
+// path calls ctx.agent.spawnTask directly anymore; every start
+// (form button, chat judgement route, day-before dialog,
+// purchase-event button, retry button) goes through
+// mgrBeginAttempt + mgrSpawnForAttempt below.
+//
+// AUXILIARY PRODUCTION INTEGRATION (2026-11-20, owner's ruling:
+// no exceptions — 100% of production background tasks under the
+// manager): the three auxiliary processings that still spawned
+// directly are under the manager too — the wait-time reference
+// site list update (kind 15), the facility image fetch (16) and
+// the one-time restaurant fact correction (17). Their completion
+// marks are their own report actions (saveWaitTimeSources /
+// reportWaitTimeSourcesFailure, saveItemImages /
+// reportItemImagesFailure, reportRestaurantFactCorrection),
+// which call mgrFinishRunForTarget directly. When one of these
+// three exhausts its attempts, the failure surfaces as an
+// in-app DIALOG carrying the one common text
+// (MGR_CONGESTION_TEXT): the forced outcome records a notice in
+// mgr_dialog_notices, getState offers the oldest unshown one,
+// and the client shows it as a dialog exactly once. A production run
+// carries its target (MgrTarget) in target_json; the manager's
+// state stays single — one set of tables, one periodic check —
+// however many production processings run at once. For a
+// production attempt, the "started" mark is the task's FIRST
+// recordTaskAttempt call (the assignment's first instruction),
+// and the "finished" mark is the processing's normal completion,
+// observed server-side: for plan creation / same-day search, the
+// run log closing through a task-driven path (savePlanSet /
+// savePlanReplacement success, or a failure / impossibility
+// report) — mgrFinishRunForTarget is called from closeRunLog
+// with the mgr flag; for research / verification, the answer /
+// result being posted (saveResearchAnswer / savePlanVerification
+// and their failure reports call mgrFinishRunForTarget directly).
+// A retry re-runs the SAME target: a plan set is created exactly
+// once, by the server, before the first attempt, and retries
+// never create another. When attempts are exhausted, the run
+// closes as forced and the failure surfaces with ONE common
+// text (MGR_CONGESTION_TEXT): on the plan set's tab for plan
+// creation / same-day search (the set / slot is marked failed,
+// retryable, never left 作成中）, as a chat post for
+// research / bulk verification, and as an in-app dialog for
+// the three auxiliary processings (kinds 15..17).
+//
+// The 10 kinds, lightest to heaviest. `phases` is the exact
+// sequence of record-call phases an attempt must complete, in
+// order; the last one closes the attempt as succeeded.
+type TaskMgrKindDef = {
+  kind: number;
+  label: string;
+  usesBrowser: boolean;
+  phases: string[];
+};
+
+const TASK_MGR_DPA_URL =
+  "https://www.tokyodisneyresort.jp/tdr/guide/app_service/disneypremieraccess.html#tab-6546897=tds&attraction-more-7040603=open";
+const TASK_MGR_ATTRACTION_URL =
+  "https://www.tokyodisneyresort.jp/tds/attraction.html";
+const TASK_MGR_TOP_URL = "https://www.tokyodisneyresort.jp/";
+
+const TASK_MGR_KINDS: TaskMgrKindDef[] = [
+  { kind: 1, label: "記録を1回呼んで終了", usesBrowser: false, phases: ["complete"] },
+  { kind: 2, label: "記録→3秒待つ→記録", usesBrowser: false, phases: ["start", "end"] },
+  { kind: 3, label: "記録を3回、順に呼ぶ", usesBrowser: false, phases: ["step", "step", "step"] },
+  { kind: 4, label: "記録→10秒待つ→記録", usesBrowser: false, phases: ["start", "end"] },
+  { kind: 5, label: "ブラウザでページを1つ開いて閉じる", usesBrowser: true, phases: ["start", "end"] },
+  { kind: 6, label: "ブラウザで公式DPAページを読み、文章を保存する", usesBrowser: true, phases: ["start", "end"] },
+  { kind: 7, label: "保管庫からレストラン一覧を読む", usesBrowser: false, phases: ["start", "end"] },
+  { kind: 8, label: "保管庫からサイトマップを読む", usesBrowser: false, phases: ["start", "end"] },
+  { kind: 9, label: "ブラウザで公式の施設一覧ページを読み、文章を保存する", usesBrowser: true, phases: ["start", "end"] },
+  { kind: 10, label: "ブラウザで公式ページを2つ読み、文章を保存する", usesBrowser: true, phases: ["start", "end"] },
+];
+
+function taskMgrKindDef(kind: number): TaskMgrKindDef {
+  return TASK_MGR_KINDS[kind - 1] ?? TASK_MGR_KINDS[0]!;
+}
+
+// The production kinds (11..17). Their parameters' initial
+// values are the owner's integration values (2026-11-20), seeded
+// by migrations 0046 (kinds 11..14) and 0047 (kinds 15..17) and
+// editable afterwards from the 裏タスク管理 tab exactly like the
+// test kinds'. A production attempt never completes through
+// record-call phases — its completion is the processing's own
+// normal completion, observed by the server (see the section
+// header) — so `phases` plays no part here; a record call on a
+// production attempt only ever marks its start.
+type TaskMgrProdKindDef = {
+  kind: number;
+  label: string;
+  startTimeoutSec: number;
+  totalTimeoutSec: number;
+  maxAttempts: number;
+};
+
+const TASK_MGR_PROD_KINDS: TaskMgrProdKindDef[] = [
+  { kind: 11, label: "プラン作成（本番）", startTimeoutSec: 180, totalTimeoutSec: 2400, maxAttempts: 3 },
+  { kind: 12, label: "当日検索（本番）", startTimeoutSec: 180, totalTimeoutSec: 1800, maxAttempts: 3 },
+  { kind: 13, label: "調べ物（本番）", startTimeoutSec: 120, totalTimeoutSec: 600, maxAttempts: 3 },
+  { kind: 14, label: "一括検証（本番）", startTimeoutSec: 180, totalTimeoutSec: 900, maxAttempts: 3 },
+  { kind: 15, label: "待ち時間サイト一覧の更新（本番）", startTimeoutSec: 120, totalTimeoutSec: 600, maxAttempts: 3 },
+  { kind: 16, label: "施設画像の取得（本番）", startTimeoutSec: 180, totalTimeoutSec: 900, maxAttempts: 3 },
+  { kind: 17, label: "レストラン事実の訂正（本番）", startTimeoutSec: 180, totalTimeoutSec: 900, maxAttempts: 3 },
+];
+
+function taskMgrProdKindDef(kind: number): TaskMgrProdKindDef | null {
+  return TASK_MGR_PROD_KINDS.find((d) => d.kind === kind) ?? null;
+}
+
+// The one common text for an attempts-exhausted abnormal end,
+// verbatim (owner's fixed wording, 2026-11-20) — used for all
+// seven production systems; only the place it surfaces differs
+// (the plan set's tab for plan creation / same-day search, the
+// AI chat for research / bulk verification, an in-app dialog
+// for the wait-time site list update, the image fetch and the
+// restaurant fact correction).
+const MGR_CONGESTION_TEXT =
+  "現在museが混雑しています。申し訳ありませんが、しばらく後に再度お試しください。";
+
+// What a production run works on. Stored on the run row as JSON
+// (task_mgr_runs.target_json); a retry re-runs exactly this.
+type MgrTarget =
+  | { type: "generation"; planSetId: number }
+  | { type: "same_day"; planSetId: number }
+  | { type: "partial"; planSetId: number; slot: "A" | "B" | "C" }
+  | { type: "research"; researchId: number }
+  | { type: "verification"; requestId: number }
+  | { type: "wait_sources"; requestId: number }
+  | { type: "item_images"; planSetId: number }
+  | { type: "restaurant_correction" };
+
+function mgrKindForTarget(target: MgrTarget): number {
+  switch (target.type) {
+    case "generation":
+    case "partial":
+      return 11;
+    case "same_day":
+      return 12;
+    case "research":
+      return 13;
+    case "verification":
+      return 14;
+    case "wait_sources":
+      return 15;
+    case "item_images":
+      return 16;
+    case "restaurant_correction":
+      return 17;
+  }
+}
+
+function mgrTargetKey(target: MgrTarget): string {
+  switch (target.type) {
+    case "generation":
+      return `generation:${target.planSetId}`;
+    case "same_day":
+      return `same_day:${target.planSetId}`;
+    case "partial":
+      return `partial:${target.planSetId}:${target.slot}`;
+    case "research":
+      return `research:${target.researchId}`;
+    case "verification":
+      return `verification:${target.requestId}`;
+    case "wait_sources":
+      return `wait_sources:${target.requestId}`;
+    case "item_images":
+      return `item_images:${target.planSetId}`;
+    case "restaurant_correction":
+      return `restaurant_correction`;
+  }
+}
+
+function parseMgrTarget(json: string | null): MgrTarget | null {
+  if (!json) return null;
+  try {
+    const v: unknown = JSON.parse(json);
+    if (typeof v !== "object" || v === null) return null;
+    const o = v as Record<string, unknown>;
+    if (
+      (o.type === "generation" || o.type === "same_day") &&
+      typeof o.planSetId === "number"
+    ) {
+      return { type: o.type, planSetId: o.planSetId };
+    }
+    if (
+      o.type === "partial" &&
+      typeof o.planSetId === "number" &&
+      (o.slot === "A" || o.slot === "B" || o.slot === "C")
+    ) {
+      return { type: "partial", planSetId: o.planSetId, slot: o.slot };
+    }
+    if (o.type === "research" && typeof o.researchId === "number") {
+      return { type: "research", researchId: o.researchId };
+    }
+    if (o.type === "verification" && typeof o.requestId === "number") {
+      return { type: "verification", requestId: o.requestId };
+    }
+    if (o.type === "wait_sources" && typeof o.requestId === "number") {
+      return { type: "wait_sources", requestId: o.requestId };
+    }
+    if (o.type === "item_images" && typeof o.planSetId === "number") {
+      return { type: "item_images", planSetId: o.planSetId };
+    }
+    if (o.type === "restaurant_correction") {
+      return { type: "restaurant_correction" };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Short human label for a production target, for the 裏タスク管理
+// tab's production list.
+function mgrTargetLabel(target: MgrTarget): string {
+  switch (target.type) {
+    case "generation":
+      return `プラン作成（プランセット#${target.planSetId}）`;
+    case "same_day":
+      return `当日検索（プランセット#${target.planSetId}）`;
+    case "partial":
+      return `部分差し替え（プランセット#${target.planSetId}・プラン${target.slot}）`;
+    case "research":
+      return `調べ物（依頼#${target.researchId}）`;
+    case "verification":
+      return `一括検証（依頼#${target.requestId}）`;
+    case "wait_sources":
+      return `待ち時間サイト一覧の更新（依頼#${target.requestId}）`;
+    case "item_images":
+      return `施設画像の取得（プランセット#${target.planSetId}）`;
+    case "restaurant_correction":
+      return `レストラン事実の訂正`;
+  }
+}
+
+// The instruction prepended to every production assignment: the
+// attempt's first record call is the ONLY accepted evidence the
+// task started, so it must come before anything else the task
+// does. Completion needs no record call — the server observes
+// the processing's own completion actions.
+function mgrRecordPrefix(attemptId: number): string {
+  return [
+    `【裏タスク管理クラスからの必須指示（他のすべての手順より優先）】`,
+    `このタスクは裏タスク管理クラスを通して開始されました。開始の証拠として、他のどのアクションよりも先に、まず recordTaskAttempt（attemptId=${attemptId}, phase="start"）を1回だけ呼んでください。この呼び出しが制限時間内に無い試行は「始まらなかった」ものとしてサーバー側で閉じられ、同じ処理が再試行されます。`,
+    `終了の記録は不要です（処理の通常の完了——プランの保存・失敗報告・回答の保存など——をサーバーが検知します）。過程記録（recordRunEvent）とは別の呼び出しです。`,
+  ].join("\n");
+}
+
+// Each execution's kind is picked at random from the 10 kinds
+// (owner's change, 2026-11-20: the test no longer cycles
+// 1→10 in order). The picked kind is stored on the run row, so
+// the record shows which kind each execution ran.
+function taskMgrRandomKind(): number {
+  return Math.floor(Math.random() * TASK_MGR_KINDS.length) + 1;
+}
+
+// Fallback parameters, used only if a kind's row is missing from
+// task_mgr_params (migration 0045 seeds the 10 test kinds with
+// exactly these values: browser kinds start 180s / total 900s,
+// the rest start 120s / total 300s, max 3 attempts everywhere;
+// migrations 0046 / 0047 seed the production kinds 11..17 with
+// the production definitions' values).
+function taskMgrDefaultParams(kind: number): {
+  startTimeoutSec: number;
+  totalTimeoutSec: number;
+  maxAttempts: number;
+} {
+  const prod = taskMgrProdKindDef(kind);
+  if (prod) {
+    return {
+      startTimeoutSec: prod.startTimeoutSec,
+      totalTimeoutSec: prod.totalTimeoutSec,
+      maxAttempts: prod.maxAttempts,
+    };
+  }
+  return taskMgrKindDef(kind).usesBrowser
+    ? { startTimeoutSec: 180, totalTimeoutSec: 900, maxAttempts: 3 }
+    : { startTimeoutSec: 120, totalTimeoutSec: 300, maxAttempts: 3 };
+}
+
+async function taskMgrParamsFor(
+  ctx: Ctx,
+  kind: number,
+): Promise<{ startTimeoutSec: number; totalTimeoutSec: number; maxAttempts: number }> {
+  const db = ctx.db<typeof schema>();
+  const rows = await db
+    .select()
+    .from(schema.taskMgrParams)
+    .where(eq(schema.taskMgrParams.kind, kind))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return taskMgrDefaultParams(kind);
+  return {
+    startTimeoutSec: row.startTimeoutSec,
+    totalTimeoutSec: row.totalTimeoutSec,
+    maxAttempts: row.maxAttempts,
+  };
+}
+
+// The assignment handed to one attempt's task. Its whole content
+// is: call this attempt's own record action in the kind's shape.
+// Nothing else is ever asked of the task.
+function buildTaskMgrAssignment(attemptId: number, kind: number): string {
+  const rec = (phase: string, extra = "") =>
+    `recordTaskAttempt（attemptId=${attemptId}, phase="${phase}"${extra}）`;
+  switch (kind) {
+    case 1:
+      return `${rec("complete")}を1回だけ呼んでください。それで終了してよい。他のことはしないでください。`;
+    case 2:
+      return `次の順で実行してください。(1) ${rec("start")}を呼ぶ。(2) 3秒待つ。(3) ${rec("end")}を呼ぶ。それで終了してよい。`;
+    case 3:
+      return `次の順で実行してください。(1) ${rec("step")}を呼ぶ。(2) 続けて${rec("step")}を呼ぶ。(3) 続けて${rec("step")}を呼ぶ。それで終了してよい。`;
+    case 4:
+      return `次の順で実行してください。(1) ${rec("start")}を呼ぶ。(2) 10秒待つ。(3) ${rec("end")}を呼ぶ。それで終了してよい。`;
+    case 5:
+      return `次の順で実行してください。(1) ${rec("start")}を呼ぶ。(2) ブラウザで ${TASK_MGR_TOP_URL} を開き、読み込みが終わったら閉じる（文章の取り出しはしない）。(3) ${rec("end", `, note="開いたページのタイトル"`)}を呼ぶ。それで終了してよい。`;
+    case 6:
+      return `次の順で実行してください。(1) ${rec("start")}を呼ぶ。(2) ブラウザで ${TASK_MGR_DPA_URL} を開き、ページの文章を取り出す。(3) ${rec("end", `, text="取り出したページの文章全体"`)}を呼ぶ。それで終了してよい。`;
+    case 7:
+      return `次の順で実行してください。(1) ${rec("start")}を呼ぶ。(2) getStorehouseRestaurants を呼び、返ってきた items の件数を数える。(3) ${rec("end", `, note="レストラン詳細の件数と available の値"`)}を呼ぶ。それで終了してよい。`;
+    case 8:
+      return `次の順で実行してください。(1) ${rec("start")}を呼ぶ。(2) getStorehouseSitemap を呼ぶ。(3) ${rec("end", `, note="サイトマップのURL件数（無ければその旨）"`)}を呼ぶ。それで終了してよい。`;
+    case 9:
+      return `次の順で実行してください。(1) ${rec("start")}を呼ぶ。(2) ブラウザで ${TASK_MGR_ATTRACTION_URL} を開き、ページの文章を取り出す。(3) ${rec("end", `, text="取り出したページの文章全体"`)}を呼ぶ。それで終了してよい。`;
+    case 10:
+      return `次の順で実行してください。(1) ${rec("start")}を呼ぶ。(2) ブラウザで ${TASK_MGR_DPA_URL} と ${TASK_MGR_ATTRACTION_URL} の2ページを順に開き、それぞれの文章を取り出す。(3) ${rec("end", `, text="2ページ分の文章を続けたもの"`)}を呼ぶ。それで終了してよい。`;
+    default:
+      return `${rec("complete")}を1回だけ呼んでください。それで終了してよい。`;
+  }
+}
+
+// Spawns one attempt of a run: the attempt row (with its
+// server-stamped spawn instant and both deadlines, from the
+// kind's current parameters) is written FIRST, then the task is
+// spawned with that attempt's own assignment. A spawn failure
+// closes the attempt as cancelled on the spot and hands over to
+// the same retry / forced logic as a timeout — a run can never
+// be left with a phantom attempt.
+async function spawnTaskMgrAttempt(ctx: Ctx, runId: number): Promise<void> {
+  const db = ctx.db<typeof schema>();
+  const runRows = await db
+    .select()
+    .from(schema.taskMgrRuns)
+    .where(eq(schema.taskMgrRuns.id, runId))
+    .limit(1);
+  const run = runRows[0];
+  if (!run || run.status !== "running") return;
+  const existing = await db
+    .select()
+    .from(schema.taskMgrAttempts)
+    .where(eq(schema.taskMgrAttempts.runId, runId))
+    .orderBy(asc(schema.taskMgrAttempts.attemptNo));
+  const attemptNo = existing.length + 1;
+  const params = await taskMgrParamsFor(ctx, run.kind);
+  const now = new Date();
+  const inserted = await db
+    .insert(schema.taskMgrAttempts)
+    .values({
+      runId,
+      attemptNo,
+      spawnedAt: now,
+      startDeadlineAt: new Date(now.getTime() + params.startTimeoutSec * 1000),
+      totalDeadlineAt: new Date(now.getTime() + params.totalTimeoutSec * 1000),
+    })
+    .returning({ id: schema.taskMgrAttempts.id });
+  const attempt = inserted[0];
+  if (!attempt) return;
+  const spawned = await ctx.agent.spawnTask(
+    buildTaskMgrAssignment(attempt.id, run.kind),
+    {
+      expectsAction: "recordTaskAttempt",
+      dedupeKey: `taskmgr-attempt-${attempt.id}`,
+    },
+  );
+  if (!spawned.ok) {
+    await db
+      .update(schema.taskMgrAttempts)
+      .set({
+        status: "cancelled",
+        finishedAt: new Date(),
+        closeReason: `タスクを開始できませんでした: ${spawned.error}`,
+      })
+      .where(eq(schema.taskMgrAttempts.id, attempt.id));
+    await afterTaskMgrAttemptClosed(ctx, runId);
+  }
+}
+
+// Decides what follows a cancelled attempt: a retry (a new
+// attempt) while the kind's max attempts allow, otherwise the
+// run closes as forced （試行回数を超えたので強制終了） and the
+// test advances. Returns what happened, for the check's report.
+async function afterTaskMgrAttemptClosed(
+  ctx: Ctx,
+  runId: number,
+): Promise<"retried" | "forced" | "none"> {
+  const db = ctx.db<typeof schema>();
+  const runRows = await db
+    .select()
+    .from(schema.taskMgrRuns)
+    .where(eq(schema.taskMgrRuns.id, runId))
+    .limit(1);
+  const run = runRows[0];
+  if (!run || run.status !== "running") return "none";
+  if (run.testId == null) return "none";
+  const testRows = await db
+    .select()
+    .from(schema.taskMgrTests)
+    .where(eq(schema.taskMgrTests.id, run.testId))
+    .limit(1);
+  const test = testRows[0];
+  if (!test || test.status !== "running") return "none";
+  const attempts = await db
+    .select()
+    .from(schema.taskMgrAttempts)
+    .where(eq(schema.taskMgrAttempts.runId, runId));
+  const params = await taskMgrParamsFor(ctx, run.kind);
+  if (attempts.length < params.maxAttempts) {
+    await spawnTaskMgrAttempt(ctx, runId);
+    return "retried";
+  }
+  const now = new Date();
+  await db
+    .update(schema.taskMgrRuns)
+    .set({
+      status: "forced",
+      finalReason: "試行回数を超えたので強制終了",
+      closedAt: now,
+    })
+    .where(eq(schema.taskMgrRuns.id, runId));
+  await advanceTaskMgrTest(ctx, run.testId);
+  return "forced";
+}
+
+// After a run closes (succeeded or forced): start the next
+// execution, or close the test when all of them are done. Runs
+// are created one at a time, strictly in sequence.
+async function advanceTaskMgrTest(ctx: Ctx, testId: number): Promise<void> {
+  const db = ctx.db<typeof schema>();
+  const testRows = await db
+    .select()
+    .from(schema.taskMgrTests)
+    .where(eq(schema.taskMgrTests.id, testId))
+    .limit(1);
+  const test = testRows[0];
+  if (!test || test.status !== "running") return;
+  const runs = await db
+    .select()
+    .from(schema.taskMgrRuns)
+    .where(eq(schema.taskMgrRuns.testId, testId));
+  const closedCount = runs.filter((r) => r.status !== "running").length;
+  if (closedCount >= test.total) {
+    await db
+      .update(schema.taskMgrTests)
+      .set({ status: "done", closedAt: new Date() })
+      .where(eq(schema.taskMgrTests.id, testId));
+    return;
+  }
+  const nextSeq = runs.length + 1;
+  const kind = taskMgrRandomKind();
+  const inserted = await db
+    .insert(schema.taskMgrRuns)
+    .values({ testId, seq: nextSeq, kind })
+    .returning({ id: schema.taskMgrRuns.id });
+  const run = inserted[0];
+  if (!run) return;
+  await spawnTaskMgrAttempt(ctx, run.id);
+}
+
+// The periodic deadline check: every open attempt — of a
+// running test AND of a production run — is judged from its
+// recorded instants alone. Run by the 1-minute schedule and
+// callable on demand.
+async function runTaskMgrCheck(
+  ctx: Ctx,
+): Promise<{ closedAttempts: number; retriedAttempts: number; forcedRuns: number }> {
+  const db = ctx.db<typeof schema>();
+  const now = new Date();
+  let closedAttempts = 0;
+  let retriedAttempts = 0;
+  let forcedRuns = 0;
+  const openAttempts = await db
+    .select()
+    .from(schema.taskMgrAttempts)
+    .where(
+      inArray(schema.taskMgrAttempts.status, ["awaiting_start", "running"]),
+    );
+  for (const attempt of openAttempts) {
+    const runRows = await db
+      .select()
+      .from(schema.taskMgrRuns)
+      .where(eq(schema.taskMgrRuns.id, attempt.runId))
+      .limit(1);
+    const run = runRows[0];
+    if (!run || run.status !== "running") continue;
+    const target = parseMgrTarget(run.targetJson);
+    if (target) {
+      // Production run. First reconcile: if the target already
+      // reached its end by another path (its completion hook
+      // normally closes the run before this; this is the
+      // guarantee behind it), close the run to match instead of
+      // judging deadlines against a finished target.
+      const reconciled = await mgrReconcileProductionTarget(ctx, target);
+      if (reconciled) {
+        await db
+          .update(schema.taskMgrAttempts)
+          .set({
+            status: reconciled === "succeeded" ? "succeeded" : "cancelled",
+            finishedAt: now,
+            closeReason:
+              reconciled === "succeeded"
+                ? "対象の処理は既に完了していたため、この試行を閉じた"
+                : "対象の処理は既に終了していたため、この試行を閉じた",
+          })
+          .where(eq(schema.taskMgrAttempts.id, attempt.id));
+        await db
+          .update(schema.taskMgrRuns)
+          .set({
+            status: reconciled,
+            closedAt: now,
+            finalReason: "対象の処理は既に終了していたため終了",
+          })
+          .where(eq(schema.taskMgrRuns.id, run.id));
+        closedAttempts += 1;
+        continue;
+      }
+      // The reason names the attempt's OWN stamped window, not
+      // the parameters in force now (they may have been edited
+      // since this attempt was spawned).
+      const startWindowSec = Math.round(
+        (attempt.startDeadlineAt.getTime() - attempt.spawnedAt.getTime()) / 1000,
+      );
+      const totalWindowSec = Math.round(
+        (attempt.totalDeadlineAt.getTime() - attempt.spawnedAt.getTime()) / 1000,
+      );
+      let reason: string | null = null;
+      if (attempt.status === "awaiting_start" && now > attempt.startDeadlineAt) {
+        reason = `開始待ちの制限時間（${startWindowSec}秒）内に最初の記録が無かったためキャンセル`;
+      } else if (now > attempt.totalDeadlineAt) {
+        reason = `全体の制限時間（${totalWindowSec}秒）内に終了しなかったためキャンセル`;
+      }
+      if (!reason) continue;
+      await db
+        .update(schema.taskMgrAttempts)
+        .set({ status: "cancelled", finishedAt: now, closeReason: reason })
+        .where(eq(schema.taskMgrAttempts.id, attempt.id));
+      closedAttempts += 1;
+      const outcome = await mgrAfterAttemptClosed(ctx, run.id);
+      if (outcome === "retried") retriedAttempts += 1;
+      if (outcome === "forced") forcedRuns += 1;
+      continue;
+    }
+    if (run.testId == null) continue;
+    const testRows = await db
+      .select()
+      .from(schema.taskMgrTests)
+      .where(eq(schema.taskMgrTests.id, run.testId))
+      .limit(1);
+    const test = testRows[0];
+    if (!test || test.status !== "running") continue;
+    const startWindowSec = Math.round(
+      (attempt.startDeadlineAt.getTime() - attempt.spawnedAt.getTime()) / 1000,
+    );
+    const totalWindowSec = Math.round(
+      (attempt.totalDeadlineAt.getTime() - attempt.spawnedAt.getTime()) / 1000,
+    );
+    let reason: string | null = null;
+    if (attempt.status === "awaiting_start" && now > attempt.startDeadlineAt) {
+      reason = `開始待ちの制限時間（${startWindowSec}秒）内に最初の記録が無かったためキャンセル`;
+    } else if (attempt.status === "running" && now > attempt.totalDeadlineAt) {
+      reason = `全体の制限時間（${totalWindowSec}秒）内に終了しなかったためキャンセル`;
+    }
+    if (!reason) continue;
+    await db
+      .update(schema.taskMgrAttempts)
+      .set({ status: "cancelled", finishedAt: now, closeReason: reason })
+      .where(eq(schema.taskMgrAttempts.id, attempt.id));
+    closedAttempts += 1;
+    const outcome = await afterTaskMgrAttemptClosed(ctx, run.id);
+    if (outcome === "retried") retriedAttempts += 1;
+    if (outcome === "forced") forcedRuns += 1;
+  }
+  return { closedAttempts, retriedAttempts, forcedRuns };
+}
+
+// ---------- Task manager: production core ----------
+//
+// The single entry point every production start goes through.
+// mgrBeginAttempt opens the run + first attempt (superseding any
+// still-open run for the same target — a user-pressed リトライ
+// replaces it, so the manager never carries two live runs for
+// one target); the caller then hands the built assignment to
+// mgrSpawnForAttempt with that attempt. A spawn failure closes
+// the attempt on the spot and hands over to the same retry /
+// forced logic as a timeout.
+
+async function mgrInsertAttempt(
+  ctx: Ctx,
+  runId: number,
+  kind: number,
+  attemptNo: number,
+): Promise<number> {
+  const db = ctx.db<typeof schema>();
+  const params = await taskMgrParamsFor(ctx, kind);
+  const now = new Date();
+  const inserted = await db
+    .insert(schema.taskMgrAttempts)
+    .values({
+      runId,
+      attemptNo,
+      spawnedAt: now,
+      startDeadlineAt: new Date(now.getTime() + params.startTimeoutSec * 1000),
+      totalDeadlineAt: new Date(now.getTime() + params.totalTimeoutSec * 1000),
+    })
+    .returning({ id: schema.taskMgrAttempts.id });
+  const attempt = inserted[0];
+  if (!attempt) throw new Error("mgrInsertAttempt: insert returned no rows");
+  return attempt.id;
+}
+
+async function mgrBeginAttempt(
+  ctx: Ctx,
+  target: MgrTarget,
+): Promise<{ runId: number; attemptId: number }> {
+  const db = ctx.db<typeof schema>();
+  const kind = mgrKindForTarget(target);
+  const key = mgrTargetKey(target);
+  const now = new Date();
+  const openRuns = await db
+    .select()
+    .from(schema.taskMgrRuns)
+    .where(
+      and(
+        eq(schema.taskMgrRuns.status, "running"),
+        isNotNull(schema.taskMgrRuns.targetJson),
+      ),
+    );
+  for (const r of openRuns) {
+    const t = parseMgrTarget(r.targetJson);
+    if (!t || mgrTargetKey(t) !== key) continue;
+    await db
+      .update(schema.taskMgrAttempts)
+      .set({
+        status: "cancelled",
+        finishedAt: now,
+        closeReason: "新しい実行が開始されたため、この試行を閉じた",
+      })
+      .where(
+        and(
+          eq(schema.taskMgrAttempts.runId, r.id),
+          inArray(schema.taskMgrAttempts.status, ["awaiting_start", "running"]),
+        ),
+      );
+    await db
+      .update(schema.taskMgrRuns)
+      .set({
+        status: "cancelled",
+        finalReason: "新しい実行が開始されたため終了",
+        closedAt: now,
+      })
+      .where(eq(schema.taskMgrRuns.id, r.id));
+  }
+  const inserted = await db
+    .insert(schema.taskMgrRuns)
+    .values({ testId: null, seq: 0, kind, targetJson: JSON.stringify(target) })
+    .returning({ id: schema.taskMgrRuns.id });
+  const run = inserted[0];
+  if (!run) throw new Error("mgrBeginAttempt: run insert returned no rows");
+  const attemptId = await mgrInsertAttempt(ctx, run.id, kind, 1);
+  return { runId: run.id, attemptId };
+}
+
+// Spawns the task for one begun attempt, with the manager's
+// record-first instruction prepended to the caller's assignment.
+// Returns "spawned" when THIS attempt's task is live, "retried"
+// when a later attempt (spawned by the retry logic below) is
+// live instead, and "exhausted" when the run has been resolved
+// without a live task (attempts exhausted — the forced outcome
+// has already been applied — or the target had already ended).
+async function mgrSpawnForAttempt(
+  ctx: Ctx,
+  att: { runId: number; attemptId: number },
+  assignmentBody: string,
+  opts: { expectsAction: string; dedupeKey: string },
+): Promise<"spawned" | "retried" | "exhausted"> {
+  const spawned = await ctx.agent.spawnTask(
+    mgrRecordPrefix(att.attemptId) + "\n\n" + assignmentBody,
+    {
+      expectsAction: opts.expectsAction,
+      dedupeKey: `${opts.dedupeKey}-mgr-${att.attemptId}`,
+    },
+  );
+  if (spawned.ok) return "spawned";
+  const db = ctx.db<typeof schema>();
+  await db
+    .update(schema.taskMgrAttempts)
+    .set({
+      status: "cancelled",
+      finishedAt: new Date(),
+      closeReason: `タスクを開始できませんでした: ${spawned.error}`,
+    })
+    .where(eq(schema.taskMgrAttempts.id, att.attemptId));
+  const outcome = await mgrAfterAttemptClosed(ctx, att.runId);
+  return outcome === "retried" ? "retried" : "exhausted";
+}
+
+// Whether a production target is still in flight (null) or has
+// already reached its end by another path ("succeeded" /
+// "cancelled" = how the manager run should close to match). A
+// plan set in status "failed" is NOT an end: a class-11 floor
+// failure leaves the task room to recover and re-save, so the
+// manager's deadlines keep governing it.
+async function mgrReconcileProductionTarget(
+  ctx: Ctx,
+  target: MgrTarget,
+): Promise<"succeeded" | "cancelled" | null> {
+  const db = ctx.db<typeof schema>();
+  switch (target.type) {
+    case "generation":
+    case "same_day": {
+      const rows = await db
+        .select({ status: schema.planSets.status })
+        .from(schema.planSets)
+        .where(eq(schema.planSets.id, target.planSetId))
+        .limit(1);
+      const set = rows[0];
+      if (!set) return "cancelled";
+      if (set.status === "done") return "succeeded";
+      return null;
+    }
+    case "partial": {
+      const rows = await db
+        .select()
+        .from(schema.planSets)
+        .where(eq(schema.planSets.id, target.planSetId))
+        .limit(1);
+      const set = rows[0];
+      if (!set) return "cancelled";
+      const prog =
+        target.slot === "A"
+          ? set.progressA
+          : target.slot === "B"
+            ? set.progressB
+            : set.progressC;
+      if (set.status === "done" && prog !== "generating") return "succeeded";
+      return null;
+    }
+    case "research": {
+      const rows = await db
+        .select({ status: schema.researchRequests.status })
+        .from(schema.researchRequests)
+        .where(eq(schema.researchRequests.id, target.researchId))
+        .limit(1);
+      const r = rows[0];
+      if (!r) return "cancelled";
+      if (r.status === "done") return "succeeded";
+      if (r.status === "failed") return "cancelled";
+      return null;
+    }
+    case "verification": {
+      const rows = await db
+        .select({ status: schema.verificationRequests.status })
+        .from(schema.verificationRequests)
+        .where(eq(schema.verificationRequests.id, target.requestId))
+        .limit(1);
+      const r = rows[0];
+      if (!r) return "cancelled";
+      if (r.status === "done") return "succeeded";
+      if (r.status === "failed") return "cancelled";
+      return null;
+    }
+    case "wait_sources": {
+      const rows = await db
+        .select({ status: schema.waitTimeSourceRequests.status })
+        .from(schema.waitTimeSourceRequests)
+        .where(eq(schema.waitTimeSourceRequests.id, target.requestId))
+        .limit(1);
+      const r = rows[0];
+      if (!r) return "cancelled";
+      if (r.status === "done") return "succeeded";
+      if (r.status === "failed") return "cancelled";
+      return null;
+    }
+    case "item_images": {
+      const rows = await db
+        .select({ imagesStatus: schema.planSets.imagesStatus })
+        .from(schema.planSets)
+        .where(eq(schema.planSets.id, target.planSetId))
+        .limit(1);
+      const set = rows[0];
+      if (!set) return "cancelled";
+      if (set.imagesStatus === "done") return "succeeded";
+      if (set.imagesStatus === "failed") return "cancelled";
+      return null;
+    }
+    case "restaurant_correction": {
+      // The correction's end is observable ONLY through its
+      // report action (which finishes the run directly): there
+      // is no durable per-run state to reconcile against — the
+      // corrected facts being registered can also mean a
+      // previous, already-finished run did the work. Deadlines
+      // therefore govern an unreported run.
+      return null;
+    }
+  }
+}
+
+// Decides what follows a closed production attempt: reconcile
+// first (a finished target is never retried), then a retry on
+// the SAME target while the kind's max attempts allow, otherwise
+// the forced outcome + the run closes as forced.
+async function mgrAfterAttemptClosed(
+  ctx: Ctx,
+  runId: number,
+): Promise<"retried" | "forced" | "none"> {
+  const db = ctx.db<typeof schema>();
+  const runRows = await db
+    .select()
+    .from(schema.taskMgrRuns)
+    .where(eq(schema.taskMgrRuns.id, runId))
+    .limit(1);
+  const run = runRows[0];
+  if (!run || run.status !== "running") return "none";
+  const target = parseMgrTarget(run.targetJson);
+  if (!target) return "none";
+  const reconciled = await mgrReconcileProductionTarget(ctx, target);
+  if (reconciled) {
+    await db
+      .update(schema.taskMgrRuns)
+      .set({
+        status: reconciled,
+        closedAt: new Date(),
+        finalReason: "対象の処理は既に終了していたため終了",
+      })
+      .where(eq(schema.taskMgrRuns.id, runId));
+    return "none";
+  }
+  const attempts = await db
+    .select()
+    .from(schema.taskMgrAttempts)
+    .where(eq(schema.taskMgrAttempts.runId, runId));
+  const params = await taskMgrParamsFor(ctx, run.kind);
+  if (attempts.length < params.maxAttempts) {
+    await mgrRespawnProduction(ctx, run, target);
+    return "retried";
+  }
+  await mgrApplyForcedOutcome(ctx, target);
+  await db
+    .update(schema.taskMgrRuns)
+    .set({
+      status: "forced",
+      finalReason: "試行回数を超えたので強制終了",
+      closedAt: new Date(),
+    })
+    .where(eq(schema.taskMgrRuns.id, runId));
+  return "forced";
+}
+
+// Spawns the next attempt of a production run: a fresh attempt
+// row first (deadlines from the kind's CURRENT parameters), then
+// the SAME processing re-started for the SAME target through the
+// processing's own start path — for plan creation / same-day
+// search, the exact re-run the generating view's リトライ button
+// performs (same set, recorded start inputs, no new set).
+async function mgrRespawnProduction(
+  ctx: Ctx,
+  run: typeof schema.taskMgrRuns.$inferSelect,
+  target: MgrTarget,
+): Promise<void> {
+  const db = ctx.db<typeof schema>();
+  const existing = await db
+    .select()
+    .from(schema.taskMgrAttempts)
+    .where(eq(schema.taskMgrAttempts.runId, run.id));
+  const attemptId = await mgrInsertAttempt(
+    ctx,
+    run.id,
+    run.kind,
+    existing.length + 1,
+  );
+  const att = { runId: run.id, attemptId };
+  switch (target.type) {
+    case "generation":
+    case "same_day": {
+      const setRows = await db
+        .select()
+        .from(schema.planSets)
+        .where(eq(schema.planSets.id, target.planSetId))
+        .limit(1);
+      const set = setRows[0];
+      if (!set) return;
+      await retryWholeSetGeneration(ctx, set, att);
+      return;
+    }
+    case "partial": {
+      const setRows = await db
+        .select()
+        .from(schema.planSets)
+        .where(eq(schema.planSets.id, target.planSetId))
+        .limit(1);
+      const set = setRows[0];
+      if (!set) return;
+      const op = parsePendingOps(set.pendingOpsJson)[target.slot];
+      if (!op) return;
+      const sealed = parseSnapshotConditions(set).conditions;
+      await startPartialReplacement(
+        ctx,
+        {
+          id: set.id,
+          title: set.title,
+          park: set.park,
+          visitDate: set.visitDate,
+        },
+        target.slot,
+        op.instruction,
+        sealed,
+        { dayOfReport: op.dayOfReport, forceRestart: true, mgrAttempt: att },
+      );
+      return;
+    }
+    case "research": {
+      const rows = await db
+        .select()
+        .from(schema.researchRequests)
+        .where(eq(schema.researchRequests.id, target.researchId))
+        .limit(1);
+      const r = rows[0];
+      if (!r) return;
+      const conditions = await loadConditions(ctx);
+      await spawnResearchAttempt(ctx, r.id, r.question, conditions, att);
+      return;
+    }
+    case "verification": {
+      const rows = await db
+        .select()
+        .from(schema.verificationRequests)
+        .where(eq(schema.verificationRequests.id, target.requestId))
+        .limit(1);
+      const r = rows[0];
+      if (!r) return;
+      const setRows = await db
+        .select()
+        .from(schema.planSets)
+        .where(eq(schema.planSets.id, r.planSetId))
+        .limit(1);
+      const set = setRows[0];
+      if (!set) return;
+      await spawnVerificationAttempt(ctx, set, r.id, att);
+      return;
+    }
+    case "wait_sources": {
+      const rows = await db
+        .select()
+        .from(schema.waitTimeSourceRequests)
+        .where(eq(schema.waitTimeSourceRequests.id, target.requestId))
+        .limit(1);
+      const r = rows[0];
+      if (!r) return;
+      await spawnWaitSourcesAttempt(ctx, r.id, r.instruction, att);
+      return;
+    }
+    case "item_images": {
+      const setRows = await db
+        .select()
+        .from(schema.planSets)
+        .where(eq(schema.planSets.id, target.planSetId))
+        .limit(1);
+      const set = setRows[0];
+      if (!set) return;
+      // Recompute what is still missing (the dictionary and
+      // other sets' photos may cover more than at the first
+      // attempt); nothing left means the fetch is done.
+      const missing = await collectMissingItemImages(ctx, set);
+      if (missing.length === 0) {
+        await db
+          .update(schema.planSets)
+          .set({ imagesStatus: "done", imagesFetchStartedAt: null })
+          .where(eq(schema.planSets.id, set.id));
+        await mgrFinishRunForTarget(ctx, target, "finished");
+        return;
+      }
+      await spawnItemImagesAttempt(ctx, set, missing, att);
+      return;
+    }
+    case "restaurant_correction": {
+      // If the corrected facts landed meanwhile (e.g. a manual
+      // fix), there is nothing left to spawn for.
+      const alreadyCorrect = await restaurantCorrectionRegistered(ctx);
+      if (alreadyCorrect.length === 2) {
+        await mgrFinishRunForTarget(ctx, target, "finished");
+        return;
+      }
+      await spawnRestaurantCorrectionAttempt(ctx, att);
+      return;
+    }
+  }
+}
+
+// Records one dialog notice carrying the common congestion
+// text. getState offers the oldest unshown notice and the
+// client displays it as a dialog once (markMgrDialogShown is
+// the read record) — the surfacing the owner chose for the
+// three auxiliary processings (kinds 15..17).
+async function insertMgrDialogNotice(ctx: Ctx): Promise<void> {
+  const db = ctx.db<typeof schema>();
+  await db
+    .insert(schema.mgrDialogNotices)
+    .values({ text: MGR_CONGESTION_TEXT });
+}
+
+// The attempts-exhausted abnormal end, per system (the text is
+// the one common MGR_CONGESTION_TEXT everywhere):
+// - plan creation / same-day search: the failure lands on the
+//   plan set's own tab — the set (or, for a partial replacement,
+//   the target slot) is marked failed with the common text as
+//   its error / failure record, never left 作成中, and the
+//   generating view's リトライ can re-run it;
+// - research / bulk verification: the common text is posted to
+//   the AI chat and the request is marked failed;
+// - wait-time site list update / image fetch / restaurant fact
+//   correction: the target is marked failed where it has state
+//   (the update request, the set's image status) and the common
+//   text is recorded as a dialog notice for the client.
+async function mgrApplyForcedOutcome(
+  ctx: Ctx,
+  target: MgrTarget,
+): Promise<void> {
+  const db = ctx.db<typeof schema>();
+  const now = new Date();
+  switch (target.type) {
+    case "generation":
+    case "same_day": {
+      const rows = await db
+        .select({
+          progressA: schema.planSets.progressA,
+          progressB: schema.planSets.progressB,
+          progressC: schema.planSets.progressC,
+        })
+        .from(schema.planSets)
+        .where(eq(schema.planSets.id, target.planSetId))
+        .limit(1);
+      const current = rows[0];
+      if (!current) return;
+      const updated = await db
+        .update(schema.planSets)
+        .set({
+          status: "failed",
+          error: MGR_CONGESTION_TEXT,
+          completedAt: now,
+          progressA: current.progressA === "done" ? "done" : "failed",
+          progressB: current.progressB === "done" ? "done" : "failed",
+          progressC: current.progressC === "done" ? "done" : "failed",
+        })
+        .where(
+          and(
+            eq(schema.planSets.id, target.planSetId),
+            inArray(schema.planSets.status, ["generating", "failed"]),
+          ),
+        )
+        .returning({ id: schema.planSets.id });
+      if (updated.length > 0) {
+        await closeOpenRunLog(
+          ctx,
+          target.planSetId,
+          "failed",
+          "試行回数を超えたので強制終了（裏タスク管理クラス）",
+        );
+      }
+      break;
+    }
+    case "partial": {
+      const rows = await db
+        .select()
+        .from(schema.planSets)
+        .where(eq(schema.planSets.id, target.planSetId))
+        .limit(1);
+      const set = rows[0];
+      if (!set) return;
+      const op = parsePendingOps(set.pendingOpsJson)[target.slot];
+      const failedOpsJson = pendingOpsJsonWith(set.pendingOpsJson, target.slot, {
+        instruction: op?.instruction ?? "",
+        dayOfReport: op?.dayOfReport ?? null,
+        startedAt: op?.startedAt ?? now.getTime(),
+        failureText: MGR_CONGESTION_TEXT,
+      });
+      const col =
+        target.slot === "A"
+          ? schema.planSets.progressA
+          : target.slot === "B"
+            ? schema.planSets.progressB
+            : schema.planSets.progressC;
+      const updated = await db
+        .update(schema.planSets)
+        .set(
+          target.slot === "A"
+            ? { progressA: "failed" as const, progressUpdatedAt: now, pendingOpsJson: failedOpsJson }
+            : target.slot === "B"
+              ? { progressB: "failed" as const, progressUpdatedAt: now, pendingOpsJson: failedOpsJson }
+              : { progressC: "failed" as const, progressUpdatedAt: now, pendingOpsJson: failedOpsJson },
+        )
+        .where(and(eq(schema.planSets.id, set.id), eq(col, "generating")))
+        .returning({ id: schema.planSets.id });
+      if (updated.length > 0) {
+        await closeOpenRunLog(
+          ctx,
+          target.planSetId,
+          "failed",
+          "試行回数を超えたので強制終了（裏タスク管理クラス）",
+          target.slot,
+        );
+      }
+      break;
+    }
+    case "research": {
+      const updated = await db
+        .update(schema.researchRequests)
+        .set({ status: "failed", completedAt: now })
+        .where(
+          and(
+            eq(schema.researchRequests.id, target.researchId),
+            eq(schema.researchRequests.status, "pending"),
+          ),
+        )
+        .returning({ id: schema.researchRequests.id });
+      if (updated.length > 0) {
+        await db.insert(schema.messages).values({
+          role: "assistant",
+          text: MGR_CONGESTION_TEXT,
+        });
+      }
+      break;
+    }
+    case "verification": {
+      const updated = await db
+        .update(schema.verificationRequests)
+        .set({ status: "failed", completedAt: now })
+        .where(
+          and(
+            eq(schema.verificationRequests.id, target.requestId),
+            eq(schema.verificationRequests.status, "pending"),
+          ),
+        )
+        .returning({ id: schema.verificationRequests.id });
+      if (updated.length > 0) {
+        await db.insert(schema.messages).values({
+          role: "assistant",
+          text: MGR_CONGESTION_TEXT,
+        });
+      }
+      break;
+    }
+    case "wait_sources": {
+      const updated = await db
+        .update(schema.waitTimeSourceRequests)
+        .set({ status: "failed", completedAt: now })
+        .where(
+          and(
+            eq(schema.waitTimeSourceRequests.id, target.requestId),
+            eq(schema.waitTimeSourceRequests.status, "pending"),
+          ),
+        )
+        .returning({ id: schema.waitTimeSourceRequests.id });
+      if (updated.length > 0) {
+        await insertMgrDialogNotice(ctx);
+      }
+      break;
+    }
+    case "item_images": {
+      const updated = await db
+        .update(schema.planSets)
+        .set({ imagesStatus: "failed", imagesFetchStartedAt: null })
+        .where(
+          and(
+            eq(schema.planSets.id, target.planSetId),
+            eq(schema.planSets.imagesStatus, "fetching"),
+          ),
+        )
+        .returning({ id: schema.planSets.id });
+      if (updated.length > 0) {
+        await insertMgrDialogNotice(ctx);
+      }
+      break;
+    }
+    case "restaurant_correction": {
+      // The correction carries no per-run state to mark; the
+      // dialog notice is its whole abnormal-end surfacing.
+      await insertMgrDialogNotice(ctx);
+      break;
+    }
+  }
+  ctx.invalidateQueries();
+}
+
+// The "finished" mark for a production run: the processing's
+// normal completion was observed server-side (see the section
+// header for what counts, per system). Closes the open attempt
+// and the run as succeeded — or as cancelled when the user
+// cancelled the processing. A run that is not open is untouched.
+async function mgrFinishRunForTarget(
+  ctx: Ctx,
+  target: MgrTarget,
+  how: "finished" | "cancelled",
+): Promise<void> {
+  const db = ctx.db<typeof schema>();
+  const key = mgrTargetKey(target);
+  const now = new Date();
+  const openRuns = await db
+    .select()
+    .from(schema.taskMgrRuns)
+    .where(
+      and(
+        eq(schema.taskMgrRuns.status, "running"),
+        isNotNull(schema.taskMgrRuns.targetJson),
+      ),
+    );
+  for (const run of openRuns) {
+    const t = parseMgrTarget(run.targetJson);
+    if (!t || mgrTargetKey(t) !== key) continue;
+    if (how === "finished") {
+      await db
+        .update(schema.taskMgrAttempts)
+        .set({
+          status: "succeeded",
+          finishedAt: now,
+          closeReason: "処理の通常の完了をサーバー側で確認した",
+        })
+        .where(
+          and(
+            eq(schema.taskMgrAttempts.runId, run.id),
+            inArray(schema.taskMgrAttempts.status, ["awaiting_start", "running"]),
+          ),
+        );
+      await db
+        .update(schema.taskMgrRuns)
+        .set({ status: "succeeded", closedAt: now })
+        .where(eq(schema.taskMgrRuns.id, run.id));
+    } else {
+      await db
+        .update(schema.taskMgrAttempts)
+        .set({
+          status: "cancelled",
+          finishedAt: now,
+          closeReason: "利用者の操作によりキャンセルされた",
+        })
+        .where(
+          and(
+            eq(schema.taskMgrAttempts.runId, run.id),
+            inArray(schema.taskMgrAttempts.status, ["awaiting_start", "running"]),
+          ),
+        );
+      await db
+        .update(schema.taskMgrRuns)
+        .set({
+          status: "cancelled",
+          finalReason: "利用者がキャンセルした",
+          closedAt: now,
+        })
+        .where(eq(schema.taskMgrRuns.id, run.id));
+    }
+  }
+}
+
+const taskMgrRunItemShape = z.object({
+  id: z.number(),
+  seq: z.number(),
+  kind: z.number(),
+  kindLabel: z.string(),
+  status: z.enum(["running", "succeeded", "forced", "cancelled"]),
+  finalReason: z.string().nullable(),
+  createdAt: z.string(),
+  closedAt: z.string().nullable(),
+  attempts: z.array(
+    z.object({
+      id: z.number(),
+      attemptNo: z.number(),
+      status: z.enum(["awaiting_start", "running", "succeeded", "cancelled"]),
+      spawnedAt: z.string(),
+      startDeadlineAt: z.string(),
+      totalDeadlineAt: z.string(),
+      firstCallAt: z.string().nullable(),
+      finishedAt: z.string().nullable(),
+      closeReason: z.string().nullable(),
+      calls: z.array(
+        z.object({
+          id: z.number(),
+          phase: z.string(),
+          calledAt: z.string(),
+          note: z.string().nullable(),
+          textLength: z.number().nullable(),
+          hasText: z.boolean(),
+        }),
+      ),
+    }),
+  ),
+});
+
+const taskMgrStateResponse = z.object({
+  params: z.array(
+    z.object({
+      kind: z.number(),
+      label: z.string(),
+      usesBrowser: z.boolean(),
+      startTimeoutSec: z.number(),
+      totalTimeoutSec: z.number(),
+      maxAttempts: z.number(),
+    }),
+  ),
+  test: z
+    .object({
+      id: z.number(),
+      status: z.enum(["running", "done", "cancelled"]),
+      total: z.number(),
+      startedAt: z.string(),
+      closedAt: z.string().nullable(),
+      closeReason: z.string().nullable(),
+      completedCount: z.number(),
+      successCount: z.number(),
+      forcedCount: z.number(),
+      currentSeq: z.number().nullable(),
+    })
+    .nullable(),
+  runs: z.array(taskMgrRunItemShape),
+  // The production processings the manager is running / has run
+  // (newest 20): the same record shape as the test runs, plus
+  // the target each run works on. One manager, one state — the
+  // tab shows both the test and the production runs it governs.
+  prodRuns: z.array(
+    taskMgrRunItemShape.extend({ targetLabel: z.string() }),
+  ),
+});
+
+// Re-runs a whole-set generation （新規作成 / 作り直し / 当日検索）
+// on the SAME set from its recorded start inputs: partially
+// saved plans are discarded, the run's result fields and
+// progress are reset, the set stands at 作成中 again, and the
+// elapsed-time clock restarts at the retry moment; the
+// conditions snapshot itself is never changed. Shared by
+// retryGeneration (the generating view's リトライ button — for a
+// generating set, and for a set the task manager marked failed
+// when its attempts ran out) and by the task manager's own
+// retry (mgrRespawnProduction, which hands its attempt in). A
+// same-day set whose snapshotted start inputs are missing
+// cannot be re-run as-is — refused BEFORE discarding anything.
+async function retryWholeSetGeneration(
+  ctx: Ctx,
+  set: typeof schema.planSets.$inferSelect,
+  mgrAttempt?: { runId: number; attemptId: number },
+): Promise<{ ok: boolean; error: string | null }> {
+  const db = ctx.db<typeof schema>();
+  let sameDayStart: { location: string; startTime: string } | null = null;
+  if (set.setType === "same_day") {
+    if (!set.sameDayLocation || !set.sameDayStartTime) {
+      return {
+        ok: false,
+        error:
+          "当日検索の開始時の記録が無いため、リトライできませんでした。キャンセルして、プラン作成タブの「当日検索」から改めてお試しください。",
+      };
+    }
+    sameDayStart = {
+      location: set.sameDayLocation,
+      startTime: set.sameDayStartTime,
+    };
+  }
+  const planRows = await db
+    .select({ id: schema.plans.id })
+    .from(schema.plans)
+    .where(eq(schema.plans.planSetId, set.id));
+  if (planRows.length > 0) {
+    const ids = planRows.map((p) => p.id);
+    await db
+      .delete(schema.planItems)
+      .where(inArray(schema.planItems.planId, ids));
+    await db.delete(schema.plans).where(inArray(schema.plans.id, ids));
+  }
+  const now = new Date();
+  await db
+    .update(schema.planSets)
+    .set({
+      status: "generating",
+      error: null,
+      progressA: "waiting",
+      progressB: "waiting",
+      progressC: "waiting",
+      progressUpdatedAt: now,
+      generationStartedAt: now,
+      completedAt: null,
+      notes: null,
+      parkHours: null,
+      sourcesJson: null,
+      estimateSourcesJson: null,
+      verificationJson: null,
+      generationMetricsJson: null,
+      crowdLevel: null,
+      crowdBasis: null,
+      factBuildId: null,
+      dpaSnapshotText: null,
+      lastVerifiedAt: null,
+      reverificationsJson: null,
+      imagesStatus: "idle",
+      imagesFetchStartedAt: null,
+    })
+    .where(eq(schema.planSets.id, set.id));
+  let spawnedOk: boolean;
+  if (set.setType === "same_day") {
+    const snapshotConditions = parseSnapshotConditions(set).conditions;
+    const agesM = /人数[:：][^\n]*（([^）]+)）/.exec(
+      set.conditionsSnapshot ?? "",
+    );
+    const sd: SameDayInput = {
+      park: set.park,
+      location: sameDayStart?.location ?? "",
+      startTime: sameDayStart?.startTime ?? "",
+      adults: set.sameDayAdults ?? 2,
+      children: set.sameDayChildren ?? 0,
+      childrenAges: agesM ? (agesM[1] ?? null) : null,
+      budgetJpy: snapshotConditions.budgetJpy,
+      walkingSpeed: set.walkingSpeed ?? "slightly_slow",
+      request: set.sameDayRequest,
+    };
+    spawnedOk = await spawnSameDayRun(ctx, set.id, sd, true, mgrAttempt);
+  } else {
+    const conditions = parseSnapshotConditions(set).conditions;
+    let prevSet: { id: number; title: string } | null = null;
+    if (set.rebuiltFromSetId != null) {
+      const origRows = await db
+        .select()
+        .from(schema.planSets)
+        .where(eq(schema.planSets.id, set.rebuiltFromSetId))
+        .limit(1);
+      const orig = origRows[0];
+      if (orig && orig.status === "done") {
+        prevSet = { id: orig.id, title: orig.title };
+      }
+    }
+    spawnedOk = await spawnGenerationRun(ctx, set.id, conditions, {
+      prevSet,
+      dayOf: null,
+      changeRequest: null,
+      title: set.title,
+      retrySpawn: true,
+      mgrAttempt,
+    });
+  }
+  ctx.invalidateQueries();
+  return spawnedOk
+    ? { ok: true, error: null }
+    : {
+        ok: false,
+        error:
+          "再実行を開始できませんでした。状態はチャットにもお知らせしました。",
+      };
+}
+
+// Whether the task manager currently has an open (running) run
+// for a production target. Used where a legacy stale-window
+// guard must defer to the manager's own deadlines.
+async function mgrHasOpenRun(ctx: Ctx, target: MgrTarget): Promise<boolean> {
+const db = ctx.db<typeof schema>();
+const key = mgrTargetKey(target);
+const openRuns = await db
+.select({ targetJson: schema.taskMgrRuns.targetJson })
+.from(schema.taskMgrRuns)
+.where(
+and(
+eq(schema.taskMgrRuns.status, "running"),
+isNotNull(schema.taskMgrRuns.targetJson),
+),
+);
+for (const r of openRuns) {
+const t = parseMgrTarget(r.targetJson);
+if (t && mgrTargetKey(t) === key) return true;
+}
+return false;
+}
+
+// Computes which of a finished set's schedule items still need
+// the image-fetch task (no photo and/or no official detail-page
+// link), applying everything that needs no task first: a fresh
+// dictionary photo / recorded official URL, and a photo another
+// finished set of the same park already owns. Shared by
+// requestItemImages (the button) and the task manager's retry
+// (which recomputes the remainder for the SAME set).
+async function collectMissingItemImages(
+ctx: Ctx,
+set: typeof schema.planSets.$inferSelect,
+): Promise<{ id: number; name: string; kind: string }[]> {
+const db = ctx.db<typeof schema>();
+const planRows = await db
+.select({ id: schema.plans.id })
+.from(schema.plans)
+.where(eq(schema.plans.planSetId, set.id));
+const missing: { id: number; name: string; kind: string }[] = [];
+const seenNames = new Set<string>();
+for (const plan of planRows) {
+const itemRows = await db
+.select()
+.from(schema.planItems)
+.where(eq(schema.planItems.planId, plan.id))
+.orderBy(asc(schema.planItems.sortOrder));
+for (const it of itemRows) {
+// An item needs the fetch task when it still lacks a photo OR its
+// official detail-page link (the same task confirms both).
+if (it.imageBlobKey && it.officialUrl) continue;
+if (
+it.kind !== "attraction" &&
+it.kind !== "show" &&
+it.kind !== "parade" &&
+it.kind !== "restaurant"
+) {
+continue;
+}
+// Facility dictionary first: a fresh dictionary photo and/or the
+// recorded official URL are applied directly, with no fetch task
+// at all. Only what the dictionary cannot cover goes to the task.
+const dict = await findFacility(ctx, set.park, it.name);
+if (dict) {
+if (
+!it.imageBlobKey &&
+dict.imageBlobKey &&
+dict.imageSource &&
+facilityFreshness(dict, Date.now()).imageFresh
+) {
+await db
+.update(schema.planItems)
+.set({
+imageBlobKey: dict.imageBlobKey,
+imageSource: dict.imageSource,
+})
+.where(eq(schema.planItems.id, it.id));
+it.imageBlobKey = dict.imageBlobKey;
+}
+if (!it.officialUrl && dict.officialUrl) {
+await db
+.update(schema.planItems)
+.set({ officialUrl: dict.officialUrl })
+.where(eq(schema.planItems.id, it.id));
+it.officialUrl = dict.officialUrl;
+}
+if (it.imageBlobKey && it.officialUrl) continue;
+}
+// Same carry-over as at save time: another finished plan set of
+// this park may already own this facility's photo (the typical
+// case is a rebuild whose original set has the photos while the
+// dictionary does not). Apply it directly, with no fetch task.
+if (!it.imageBlobKey) {
+const owned = await findOwnedFacilityPhoto(
+ctx,
+set.park,
+it.name,
+set.id,
+);
+if (owned) {
+await db
+.update(schema.planItems)
+.set({ imageBlobKey: owned.key, imageSource: owned.source })
+.where(eq(schema.planItems.id, it.id));
+it.imageBlobKey = owned.key;
+await upsertFacilityFromFetch(ctx, set.park, {
+name: it.name,
+image: { blobKey: owned.key, source: owned.source },
+});
+}
+}
+if (it.imageBlobKey && it.officialUrl) continue;
+// The same facility can appear in several plans; fetch it once and
+// share the blob with every row of that name in this set.
+if (seenNames.has(it.name)) continue;
+seenNames.add(it.name);
+missing.push({ id: it.id, name: it.name, kind: it.kind });
+}
+}
+return missing;
+}
+
+// Spawns the image-fetch task for a set's missing items, through
+// the task manager （裏タスク管理クラス・種類16): the set is
+// marked 取得中 first, then the attempt is begun here (or handed
+// in by the manager's retry, which re-runs the SAME set with its
+// remainder recomputed). A spawn failure is the manager's to
+// retry / exhaust; on exhaustion the manager has already marked
+// the fetch failed and recorded the common congestion text as a
+// dialog notice.
+async function spawnItemImagesAttempt(
+ctx: Ctx,
+set: typeof schema.planSets.$inferSelect,
+missing: { id: number; name: string; kind: string }[],
+mgrAttempt?: { runId: number; attemptId: number },
+): Promise<boolean> {
+const db = ctx.db<typeof schema>();
+await db
+.update(schema.planSets)
+.set({ imagesStatus: "fetching", imagesFetchStartedAt: new Date() })
+.where(eq(schema.planSets.id, set.id));
+const att =
+mgrAttempt ??
+(await mgrBeginAttempt(ctx, { type: "item_images", planSetId: set.id }));
+const spawnOutcome = await mgrSpawnForAttempt(
+ctx,
+att,
+buildImageAssignment(set.park, set.id, missing),
+{
+expectsAction: "saveItemImages",
+// The manager appends its own attempt suffix to this key, so a
+// retry never dedupes against the dead earlier task.
+dedupeKey: `plan-images-${set.id}`,
+},
+);
+ctx.invalidateQueries();
+return spawnOutcome !== "exhausted";
+}
+
+// Which of the two corrected restaurant classifications are
+// already registered with the corrected values (the one-time
+// correction's idempotence check, shared by
+// applyRestaurantFactCorrection and the task manager's retry).
+async function restaurantCorrectionRegistered(
+ctx: Ctx,
+): Promise<string[]> {
+const alreadyCorrect: string[] = [];
+const main = await findCurrentRestaurantFact(
+ctx,
+"sea",
+"ケープコッド・クックオフ",
+);
+if (
+main &&
+main.reservationType === "none" &&
+main.mobileOrder === "available"
+) {
+alreadyCorrect.push("ケープコッド・クックオフ");
+}
+const showArea = await findCurrentRestaurantFact(
+ctx,
+"sea",
+"ケープコッド・クックオフ（ショーダイニングエリア）",
+);
+if (
+showArea &&
+showArea.reservationType === "required" &&
+showArea.mobileOrder === "not_available"
+) {
+alreadyCorrect.push("ケープコッド・クックオフ（ショーダイニングエリア）");
+}
+return alreadyCorrect;
+}
+
+// The one-time restaurant fact correction's assignment (the
+// task text itself is unchanged from the direct-spawn era).
+function buildRestaurantCorrectionAssignment(): string {
+return `【レストラン分類の訂正タスク（一回限り）】
+施設辞書の旧来の列に、ケープコッド・クックオフ本体が「予約必須」と誤って記録されています（「ショーレストラン」というラベルからの推測が原因）。レストランの分類は、施設自身の公式レストラン詳細ページの記述から、根拠つきのファクトとして登録し直すのがこのタスクです。推測で分類を作ることは絶対にしないでください。ページの実文が下記の想定と違う場合は、想定を押し通さず、実文が裏づける分類で登録し、その旨を報告してください。
+
+手順:
+1. 公式ページ https://www.tokyodisneyresort.jp/tds/restaurant/detail/446/ （ケープコッド・クックオフ本体）をブラウザで開き、全文を読む。読む前に、saveSourceSnapshots アクションで生テキストのまま保存すること（batchId は "restaurant-correction-2026-11-16"、kind は "restaurant_detail"、park は "sea"、url は開いたページのURLそのまま、title はページのタイトル、fetchMethod は "browser"、completeness は {expectationSource: "none", expectation: "レストラン詳細ページには件数宣言が無いため、完全性の期待値は導けない", result: "not_derivable"}）。返ってきた snapshotIds の、このページの id を控える。
+2. saveRestaurantFacts アクション（park="sea"）で、本体のファクトを登録する:
+   - name: "ケープコッド・クックオフ"
+   - serviceType: ページの「サービスタイプ」の表記そのまま（「カウンターサービス」の想定。ページの表記が違えばそちらを使う）
+   - snapshotId: 手順1の id
+   - reservation: {type: "none", evidenceKind: "absence", evidence: ページ内で施設名を含む一節（ページ冒頭の施設名の行など、保存したスナップショット本文から一字も変えずに切り取る）} —— 不在の根拠はサーバーが全文で機械確認します。もし登録が「存在マーカーがある」と拒否されたら、そのマーカーが示す分類がページの実態です。想定を押し通さず、実文が裏づける分類（required/ps/unknown＋理由）で登録し直し、報告に明記してください。
+   - mobileOrder: {type: "available", evidenceKind: "excerpt", evidence: 「ディズニー・モバイルオーダー対象」と書かれた一節（保存した本文から逐語で切り取る）}
+3. 公式ページ https://www.tokyodisneyresort.jp/tds/restaurant/detail/447/ （ケープコッド・クックオフ（ショーダイニングエリア））も同じ手順で開いて保存し（batchId は同じ）、ファクトを登録する:
+   - name: "ケープコッド・クックオフ（ショーダイニングエリア）"
+   - serviceType: ページにサービスタイプの表記があればそのまま、無ければ null
+   - reservation: {type: "required", evidenceKind: "excerpt", evidence: 予約が必要だと書かれた一節（「ショーレストランのご利用には予約が必要です」の想定。ページの実文から逐語で切り取る）}
+   - mobileOrder: ページにモバイルオーダーの記載が一切無ければ {type: "not_available", evidenceKind: "absence", evidence: 施設名を含む一節}。記載があれば実文が裏づける分類で登録する。
+4. getFacilityDictionary（park="sea"）で施設辞書を確認し、ケープコッド・クックオフ（ショーダイニングエリア）のエントリが無ければ、saveFacilities（park="sea"）で {name, area: ページのエリア表記, officialUrl: 手順3のURL} だけを保存して別エントリとして追加する（分類のフィールド reservationType/mobileOrder は渡さないこと。分類はファクトの専管）。
+5. 最後に必ず reportRestaurantFactCorrection アクションを1回呼ぶ。成功したら status="done"、text には登録した内容（施設ごとに予約形態とモバイルオーダーの値、根拠にしたページ）を短く書く。途中でどうしても登録できない場合は status="failed"、text に理由を書く。黙って終わらないこと。
+
+注意: プラン・プランの行・メッセージ等の業務データは一切変更しないこと。このタスクが書くのは、スナップショット2件、ファクト2件、（必要なら）施設辞書のショーダイニングエリアのエントリ1件だけです。`;
+}
+
+// Spawns the one-time restaurant fact correction task, through
+// the task manager （裏タスク管理クラス・種類17): the attempt is
+// begun here (or handed in by the manager's retry — the
+// correction is a singleton target, so a retry re-runs the same
+// correction). A spawn failure is the manager's to retry /
+// exhaust; on exhaustion the manager has already recorded the
+// common congestion text as a dialog notice.
+async function spawnRestaurantCorrectionAttempt(
+ctx: Ctx,
+mgrAttempt?: { runId: number; attemptId: number },
+): Promise<boolean> {
+const att =
+mgrAttempt ??
+(await mgrBeginAttempt(ctx, { type: "restaurant_correction" }));
+const spawnOutcome = await mgrSpawnForAttempt(
+ctx,
+att,
+buildRestaurantCorrectionAssignment(),
+{
+expectsAction: "reportRestaurantFactCorrection",
+dedupeKey: "restaurant-fact-correction-2026-11-16",
+},
+);
+ctx.invalidateQueries();
+return spawnOutcome !== "exhausted";
+}
+
 export const Actions = {
 getState: defineAction({
 description:
@@ -7852,6 +11590,31 @@ response: stateResponse,
 async handler(ctx): Promise<z.infer<typeof stateResponse>> {
 const db = ctx.db<typeof schema>();
 const conditions = await loadConditions(ctx);
+
+// 裏タスク管理： targets with a live manager run are governed
+// by the manager's own deadlines (its 1-minute check), NOT by
+// the stale-window guards below — the manager's total timeout
+// for plan creation (2400s) is longer than the generation
+// stale window, and a guard firing first would fail a target
+// the manager is still legitimately retrying. The guards keep
+// covering everything the manager does not run (legacy rows
+// from before the manager took over a processing).
+const mgrManagedKeys = new Set<string>();
+{
+const openMgrRuns = await db
+.select({ targetJson: schema.taskMgrRuns.targetJson })
+.from(schema.taskMgrRuns)
+.where(
+and(
+eq(schema.taskMgrRuns.status, "running"),
+isNotNull(schema.taskMgrRuns.targetJson),
+),
+);
+for (const r of openMgrRuns) {
+const t = parseMgrTarget(r.targetJson);
+if (t) mgrManagedKeys.add(mgrTargetKey(t));
+}
+}
 
 // Chat research lifecycle: pending rows younger than the stale window
 // keep the client polling with a "確認中" indicator. A pending row past
@@ -7864,6 +11627,10 @@ const pendingResearch = await db
 .where(eq(schema.researchRequests.status, "pending"));
 let researchPending = false;
 for (const r of pendingResearch) {
+if (mgrManagedKeys.has(`research:${r.id}`)) {
+researchPending = true;
+continue;
+}
 if (Date.now() - r.createdAt.getTime() > RESEARCH_STALE_MS) {
 const updated = await db
 .update(schema.researchRequests)
@@ -7890,12 +11657,19 @@ researchPending = true;
 // the first time the list is read, and run the same dead-task guard as
 // research — a pending update past the stale window is failed once and
 // reported in chat instead of leaving the indicator on forever.
+// Updates the task manager is running are exempt (see the manager
+// note above): their deadlines and retries govern, and exhaustion
+// surfaces as a dialog notice instead of this chat line.
 const pendingWaitReqs = await db
 .select()
 .from(schema.waitTimeSourceRequests)
 .where(eq(schema.waitTimeSourceRequests.status, "pending"));
 let waitTimeSourcesPending = false;
 for (const r of pendingWaitReqs) {
+if (mgrManagedKeys.has(`wait_sources:${r.id}`)) {
+waitTimeSourcesPending = true;
+continue;
+}
 if (Date.now() - r.createdAt.getTime() > RESEARCH_STALE_MS) {
 const updated = await db
 .update(schema.waitTimeSourceRequests)
@@ -7931,6 +11705,11 @@ const pendingVerifications = await db
 let verificationPending = false;
 const verifyingSetIds = new Set<number>();
 for (const r of pendingVerifications) {
+if (mgrManagedKeys.has(`verification:${r.id}`)) {
+verificationPending = true;
+verifyingSetIds.add(r.planSetId);
+continue;
+}
 if (Date.now() - r.createdAt.getTime() > VERIFICATION_STALE_MS) {
 const updated = await db
 .update(schema.verificationRequests)
@@ -7971,6 +11750,12 @@ const generatingSets = await db
 .from(schema.planSets)
 .where(eq(schema.planSets.status, "generating"));
 for (const s of generatingSets) {
+if (
+mgrManagedKeys.has(`generation:${s.id}`) ||
+mgrManagedKeys.has(`same_day:${s.id}`)
+) {
+continue;
+}
 const lastProgressAt = s.progressUpdatedAt?? s.createdAt;
 if (Date.now() - lastProgressAt.getTime() > GENERATION_STALE_MS) {
 const updated = await db
@@ -8004,6 +11789,14 @@ s.setType === "same_day"
 ? `「${s.title}」の作り直しは完了しませんでした。（対象条件: ${setConditionsSummary(s)}）元のプランはそのまま残っています。お手数ですが、もう一度お試しください。`
 : `「${s.title}」のプラン作成が完了しませんでした。（対象条件: ${setConditionsSummary(s)}）お手数ですが、プラン作成タブからもう一度作成してください。`,
 });
+// 過程記録： the task died without reporting — close its run
+// here, with the reason stated as unknown (never left open).
+await closeOpenRunLog(
+ctx,
+s.id,
+"failed",
+"タスクからの終了報告がなく、理由不明（進捗報告の途絶によりサーバーが記録を閉じた）",
+);
 }
 }
 }
@@ -8032,6 +11825,7 @@ const slotStates = [
 let guardOpsJson = s.pendingOpsJson;
 for (const [slot, prog] of slotStates) {
 if (prog!== "generating") continue;
+if (mgrManagedKeys.has(`partial:${s.id}:${slot}`)) continue;
 const col =
 slot === "A"
 ? schema.planSets.progressA
@@ -8055,6 +11849,88 @@ await db.insert(schema.messages).values({
 role: "assistant",
 text: `プラン${slot}の差し替えは完了しませんでした。「${s.title}」の元のプラン${slot}はそのまま残っています。お手数ですが、もう一度指示してください。`,
 });
+// 過程記録： the replacement task died without reporting —
+// close its run here, reason stated as unknown.
+await closeOpenRunLog(
+ctx,
+s.id,
+"failed",
+"タスクからの終了報告がなく、理由不明（進捗報告の途絶によりサーバーが記録を閉じた）",
+slot,
+);
+}
+}
+}
+
+// Run-log sweep （過程記録）: a run record must never dangle open.
+// The primary closes happen at the save / failure-report /
+// watchdog points above; this sweep is the guarantee behind them
+// — any still-open run whose set has reached a terminal state (or
+// been deleted) and whose trail has been silent past the stale
+// window is closed here, with the reason stated (理由不明 when
+// nothing was ever reported). Runs on still-generating sets, and
+// partial runs whose slot is still 作成中， are left to their own
+// paths above.
+{
+const openRuns = await db
+.select()
+.from(schema.runLogs)
+.where(eq(schema.runLogs.status, "open"));
+for (const r of openRuns) {
+const setRows = await db
+.select()
+.from(schema.planSets)
+.where(eq(schema.planSets.id, r.planSetId))
+.limit(1);
+const set = setRows[0];
+if (set && set.status === "generating") continue;
+if (
+set &&
+set.status === "done" &&
+r.kind === "partial" &&
+(r.slot === "A"
+? set.progressA
+: r.slot === "B"
+? set.progressB
+: set.progressC) === "generating"
+) {
+continue;
+}
+const lastEvents = await db
+.select({ at: schema.runLogEvents.at })
+.from(schema.runLogEvents)
+.where(eq(schema.runLogEvents.runId, r.id))
+.orderBy(desc(schema.runLogEvents.id))
+.limit(1);
+const lastActivityAt = lastEvents[0]?.at ?? r.startedAt;
+if (Date.now() - lastActivityAt.getTime() <= GENERATION_STALE_MS) {
+continue;
+}
+if (!set) {
+await closeRunLog(
+ctx,
+r.id,
+"cancelled",
+"対象のプランセットが削除されたため、記録を閉じた",
+);
+} else if (set.status === "failed") {
+await closeRunLog(
+ctx,
+r.id,
+"failed",
+set.error
+? `セットの失敗理由として記録されたもの: ${set.error}`
+: "タスクからの終了報告がなく、理由不明（サーバーが記録を閉じた）",
+);
+} else if (r.kind === "partial") {
+await closeRunLog(
+ctx,
+r.id,
+"failed",
+"タスクからの終了報告がなく、理由不明（サーバーが記録を閉じた）",
+);
+} else {
+await closeRunLog(ctx, r.id, "succeeded", null);
 }
 }
 }
@@ -8261,17 +12137,15 @@ const verificationRecord = parseVerificationJson(set.verificationJson);
 // The set's own search conditions, parsed back from its stored
 // snapshot for the plan tab's 「条件」 panel (see planSetShape).
 const snapshotConditions = parseSnapshotConditions(set);
-// Last verified: the later of the stored timestamp (advanced by
-// every bulk re-verification) and the creation record's checkedAt
-// (the authority the brief names — a partial replacement rewrites
-// the record's checkedAt without touching the stored column).
+// Last verified: the stored timestamp is authoritative — every
+// write path (creation save, partial replacement, bulk
+// re-verification) stamps it with the actual instant that
+// verification passed. The creation record's checkedAt is only a
+// fallback for legacy rows whose column is still null (it is a
+// fetch DATE, so it can only stand in as that day, never as the
+// verification instant — T96).
 const fromRecordDate = checkedAtToDate(verificationRecord?.checkedAt);
-const effectiveVerifiedAt =
-set.lastVerifiedAt && fromRecordDate
-? set.lastVerifiedAt.getTime() >= fromRecordDate.getTime()
-? set.lastVerifiedAt
-: fromRecordDate
-: (set.lastVerifiedAt ?? fromRecordDate);
+const effectiveVerifiedAt = set.lastVerifiedAt ?? fromRecordDate;
 planSets.push({
 id: set.id,
 title: set.title,
@@ -8337,6 +12211,18 @@ B: startFor("B", set.progressB),
 C: startFor("C", set.progressC),
 };
 })(),
+partialOpFailures: (() => {
+const ops = parsePendingOps(set.pendingOpsJson);
+const failureFor = (slot: "A" | "B" | "C", prog: string) => {
+if (set.status !== "done" || prog !== "failed") return null;
+return ops[slot]?.failureText ?? null;
+};
+return {
+A: failureFor("A", set.progressA),
+B: failureFor("B", set.progressB),
+C: failureFor("C", set.progressC),
+};
+})(),
 error: set.error,
 rebuiltFromSetId: set.rebuiltFromSetId,
 setType: set.setType,
@@ -8359,8 +12245,13 @@ priorities: parseSnapshotPriorities(set.conditionsSnapshot),
 conditions: set.conditionsSnapshot ? snapshotConditions.conditions : null,
 conditionsMissing: snapshotConditions.missing,
 // A fetch stuck past the stale window is surfaced as failed so the
-// user gets the retry button back instead of an endless "取得中".
-imagesStatus: isStaleImageFetch(set)? "failed": set.imagesStatus,
+// user gets the retry button back instead of an endless "取得中" —
+// unless the task manager is running this fetch, in which case its
+// own deadlines govern and the fetch keeps showing 取得中.
+imagesStatus:
+isStaleImageFetch(set) && !mgrManagedKeys.has(`item_images:${set.id}`)
+? "failed"
+: set.imagesStatus,
 notes: set.notes,
 parkHours: set.parkHours,
 sources,
@@ -8398,6 +12289,20 @@ visitDate: eveCandidate.visitDate,
 }
 : null;
 
+// Task-manager dialog notice: the oldest one not yet shown.
+// The client captures it into a dialog the moment it appears
+// and marks it shown at the same moment, so it displays once.
+const noticeRows = await db
+.select()
+.from(schema.mgrDialogNotices)
+.where(isNull(schema.mgrDialogNotices.shownAt))
+.orderBy(asc(schema.mgrDialogNotices.id))
+.limit(1);
+const noticeRow = noticeRows[0];
+const mgrDialogNotice = noticeRow
+? { id: noticeRow.id, text: noticeRow.text }
+: null;
+
 return {
 conditions,
 messages: messageRows.map((m) => ({
@@ -8412,7 +12317,28 @@ waitTimeSources,
 waitTimeSourcesPending,
 verificationPending,
 eveVerification,
+mgrDialogNotice,
 };
+},
+}),
+
+markMgrDialogShown: defineAction({
+description:
+"Marks one task-manager dialog notice as shown (the read record for the congestion dialog the client displays when an auxiliary production processing — wait-time site list update, image fetch, or restaurant fact correction — exhausted its attempts). Called by the client the moment it captures the notice into its dialog state, so the notice is offered exactly once.",
+request: z.object({ noticeId: z.number() }),
+response: z.object({ ok: z.literal(true) }),
+async handler(ctx, args): Promise<{ ok: true }> {
+const db = ctx.db<typeof schema>();
+await db
+.update(schema.mgrDialogNotices)
+.set({ shownAt: new Date() })
+.where(
+and(
+eq(schema.mgrDialogNotices.id, args.noticeId),
+isNull(schema.mgrDialogNotices.shownAt),
+),
+);
+return { ok: true as const };
 },
 }),
 
@@ -8535,7 +12461,7 @@ return { ok: true};
 
 sendMessage: defineAction({
 description:
-"Sends a user message to the TAB1 AI chat; returns the assistant reply, plus whether it kicked off plan generation. Whether to start — and whether it is a fresh creation, a whole-set rebuild, a partial replacement of one plan, or a day-of reschedule — is judged by the chat AI from the conversation context and the open tab (the user's explicit decision: no phrase gate; over-reading intent and starting is accepted, while a clear question, fact-check request, or bare fact report does not start). A chat-started NEW creation runs ONLY on the conditions presented for THIS trigger （記録V sealing): the chat AI receives the triggering message as an independent input (id + text) and extracts chatConditions ONLY from the bounded window from the last generation start up to the trigger — never from older history, never from its own past replies, and never from the saved TAB2 form conditions (neither as base nor to fill gaps) — a missing required field (date, park, adult count, budget, entry/exit times) means no start and a reply asking back for exactly what is missing; children are never a required field — no mention of children fixes the count at 0 and starts without asking back, and a stated adult count (e.g. 「大人2人」) completes the party even without child ages/heights. Chat-presented budgets are always totals including park tickets. Rebuilds / reschedules / partial replacements run against the target set's saved conditions, parsed from its stored conditionsSnapshot (never the live form; snapshot fields that cannot be read are stated honestly in the start reply, not filled from the form). The whole handler runs inside the serialized start section shared by every start entrance, and a start that had to wait for a previous start says so in its reply, with the conditions actually used. Acceptance replies are written from the actual start result, naming the target set, the scope, the change, and the conditions actually used (date, park, party). Also returns whether it kicked off an official-site fact-check, a wait-time reference-site list update (add/remove/re-search, on an explicit instruction), or a bulk re-verification （一括検証） of the reference plan set (a 「検証して」 instruction — re-checks the stored plans against freshly fetched official data and changes nothing). The client also reports the tab open at send time (`openTab`): when it is a plan-set tab, that set is the reference for plan mentions （「プランB」 means that set's plan B) and for edit/rebuild targets; from any other tab the reference falls back to the most recently created plan set. If the presented conditions say (in context, not by phrase matching) that a wheelchair user is among the participants, no start of any kind happens （記録AR): the reply is the fixed out-of-scope notice (core line 「車椅子の方が参加者に含まれる場合、本アプリでは対応できません」, plus the official DAS / 合流利用サービス / barrier-free guide named as information only — no §12.9 classification, no fixed guidance line) and generationStarted is null; a research request about wheelchair accessibility itself, with no wheelchair user stated as a participant, is not blocked and proceeds as research.",
+"Sends a user message to the TAB1 AI chat; returns the assistant reply, plus whether it kicked off plan generation. Whether to start — and whether it is a fresh creation, a whole-set rebuild, a partial replacement of one plan, or a day-of reschedule — is judged by the chat AI from the conversation context and the open tab (the user's explicit decision: no phrase gate; over-reading intent and starting is accepted, while a clear question, fact-check request, or bare fact report does not start). A chat-started NEW creation runs ONLY on the conditions presented for THIS trigger （記録V sealing): the chat AI receives the triggering message as an independent input (id + text) and extracts chatConditions ONLY from the bounded window from the last generation start up to the trigger — never from older history, never from its own past replies, and never from the saved TAB2 form conditions (neither as base nor to fill gaps) — a missing required field (date, park, adult count, budget, entry/exit times) means no start and a reply asking back for exactly what is missing; children are never a required field — no mention of children fixes the count at 0 and starts without asking back, and a stated adult count (e.g. 「大人2人」) completes the party even without child ages/heights. Chat-presented budgets are always totals including park tickets. Rebuilds / reschedules / partial replacements run against the target set's saved conditions, parsed from its stored conditionsSnapshot (never the live form; snapshot fields that cannot be read are stated honestly in the start reply, not filled from the form). The whole handler runs inside the serialized start section shared by every start entrance, and a start that had to wait for a previous start says so in its reply, with the conditions actually used. Acceptance replies are written from the actual start result, naming the target set, the scope, the change, and the conditions actually used (date, park, party). The judgement also returns structured condition changes (conditionChanges — the condition values the instruction changes, with their new values, on any judgement kind): for a rebuild the server applies them to the target set's saved conditions and the new set is created with the changed conditions; a partial replacement carrying condition changes is rerouted to a whole-set rebuild on the changed conditions instead of a slot replacement. The server verifies the changes twice — on the sealed conditions before the start and on the created set's stored conditions after it — and a mismatch means no generation proceeds (the created set is removed) and the reply says the change could not be reflected, never a silent rebuild on the original conditions. Start replies (new creation, rebuild, reschedule) carry the full conditions actually used — date, park, party, budget, entry/exit times, walking speed, priority — built mechanically from the created set's stored snapshot, not from the model's wording. Also returns whether it kicked off an official-site fact-check, a wait-time reference-site list update (add/remove/re-search, on an explicit instruction), or a bulk re-verification （一括検証） of the reference plan set (a 「検証して」 instruction — re-checks the stored plans against freshly fetched official data and changes nothing). The client also reports the tab open at send time (`openTab`): when it is a plan-set tab, that set is the reference for plan mentions （「プランB」 means that set's plan B) and for edit/rebuild targets; from any other tab the reference falls back to the most recently created plan set. If the presented conditions say (in context, not by phrase matching) that a wheelchair user is among the participants, no start of any kind happens （記録AR): the reply is the fixed out-of-scope notice (core line 「車椅子の方が参加者に含まれる場合、本アプリでは対応できません」, plus the official DAS / 合流利用サービス / barrier-free guide named as information only — no §12.9 classification, no fixed guidance line) and generationStarted is null; a research request about wheelchair accessibility itself, with no wheelchair user stated as a participant, is not blocked and proceeds as research.",
 request: z.object({
 text: z.string().min(1).max(4000),
 // The tab the user had open when the message was sent. `planSet`
@@ -8886,7 +12812,16 @@ windowText,
 `【チャット条件の受け渡しルール（新規作成・厳守）】`,
 `・チャットから新規作成（generationKind が "new"）を開始する場合に使う条件は、上の【条件抽出の対象範囲】に示したユーザーメッセージ（最後の生成開始以降〜トリガーメッセージ）で提示された条件だけです。抽出源はその範囲に限定してください：範囲より前の会話履歴（このプロンプトの会話履歴欄に古い条件が載っていても）、冒頭の【保存済みの条件】（プラン作成タブのフォーム値）、AI自身の過去の返信（開始応答に復唱された条件を含む）は、抽出源として絶対に使ってはいけません（流用・補完・暗黙の上書きは禁止）。範囲内のユーザーメッセージに条件が提示されていたら、それを chatConditions に正確に抽出してください：日付は YYYY-MM-DD、時刻は H:MM、予算は数値（円）に正規化し、人数は大人／子どもの人数、子どもの年齢・身長は提示された表記のまま childrenAges に入れる。範囲内に異なる値が複数ある場合は、トリガーメッセージの値を最優先し、トリガーに無い項目だけを範囲内の他のユーザーメッセージで補ってください。提示されていない項目は null のままにし、タブの保存条件で埋めないこと。ただし子どもは例外です：子どもの記載が範囲内に無ければ、子どもは0人として確定し、children に 0 を入れてください（null のままにしない）。子どもの年齢・身長（childrenAges）が書かれていなくても不足として扱わないでください（childrenAges は null でよい）。「大人2人」のように大人の人数が明記されていれば、人数は揃ったものとして扱ってください（子どもの年齢・身長が無くても人数の不足にしない）。予算は常に総額（チケット代込み）として扱ってください：提示された金額をそのまま budgetJpy に入れ、チケット代を差し引いたり「チケット代を除く目安」として解釈したりしないでください。`,
 `・必須項目（日付・パーク・大人の人数・予算・入園時刻・退園時刻）が抽出範囲の提示条件に足りない場合でも、タブの条件や範囲外の履歴で埋めてはいけません。その場合も wantsPlanGeneration は true、generationKind は "new" とし、chatConditions には提示された分だけを入れてください（不足分はアプリ側が聞き返し、開始しません）。返信では、不足している項目を挙げて聞き返してください。聞き返してよいのは、日付・パーク・大人の人数・予算・入園／退園時刻が読み取れない場合に限ります。子どもは必須項目ではありません：子どもの記載が無ければ子ども0人で確定し、子どもの有無や子どもの年齢・身長を聞き返してはいけません。`,
-`・作り直し（"rebuild"）・当日のリスケジュール（"reschedule"）・部分差し替えでは chatConditions は null でよい（対象セットの保存条件が使われます）。`,
+`・作り直し（"rebuild"）・当日のリスケジュール（"reschedule"）・部分差し替えでは chatConditions は null でよい（対象セットの保存条件が使われます）。ただし、利用者の指示が条件の値を変える内容を含む場合は、chatConditions が null でも、下の【条件の変更点の受け渡しルール】に従って conditionChanges に変更点を必ず入れてください。`,
+``,
+`【条件の変更点の受け渡しルール（厳守）】`,
+`・利用者の指示が、条件（日付・パーク・大人の人数・子どもの人数・子どもの年齢や身長・予算・入園時刻・退園時刻・重視する点・歩く速さ）のどれかの値を変える内容なら、判定の種類（新規作成・作り直し・当日のリスケジュール・部分差し替え）にかかわらず、変更される項目と新しい値を conditionChanges に構造化して必ず入れてください。変える項目だけに新しい値を入れ、変えない項目は null のままにしてください。条件の変更が無い場合は conditionChanges は null です。`,
+`・条件の値を変える指示は、作り直しや修正の依頼であっても、必ず条件の変更点として返してください。値を落として「作り直し」という判定だけにすることは禁止です（例：「退園を19:30にして」は、作り直しの依頼であると同時に、退園時刻を19:30に変える条件変更です。generationKind は "rebuild"、conditionChanges.exitTime は "19:30" と、両方を返してください）。`,
+`・条件の変更は planChange には入れないでください。planChange はプランの内容そのものへの変更（施設の追加・削除・入れ替え）専用です。条件の値の変更だけの指示では planChange は null にしてください。条件変更を含む指示は、アプリ側で「変更後の条件での作り直し」として実行されます（特定のプランへの内容変更と一緒に指示された場合も、条件変更が優先され、セット全体の作り直しになります）。`,
+`・予算の変更は、新しい金額（総額）が示されている場合だけ conditionChanges.budgetJpy に入れてください。「もっと安くして」のように方向だけで金額の示されていない指示は、条件変更として扱ってはいけません（開始せず金額を聞き返す。上の【プラン作成の開始判断（原則）】参照）。`,
+`・変更の相談段階（まだ開始指示がなく、生成が開始されていない同じやり取りの中）で決まった条件変更は、ユーザーが後から「作り直して」とだけ言ったときも、その変更を conditionChanges に入れて引き継いでください。ただし、その変更をきっかけに既に生成が開始されている場合は反映済みであり、再び conditionChanges に入れてはいけません。`,
+`・conditionChanges の抽出源は、上の【条件抽出の対象範囲】（最後の生成開始以降〜トリガーメッセージまで）にあるユーザーメッセージだけです。範囲より前の会話履歴に条件の変更があっても、それは既に開始済みの生成で反映されているので、履歴から拾って別の作り直しへ再適用してはいけません（例：前の指示で退園19:30への変更が開始済みのあとに「作り直して」とだけ言われた場合は、対象セットの保存条件のまま作り直すもので、conditionChanges は null です）。`,
+`・値の書式：日付は YYYY-MM-DD、時刻は H:MM、予算は数値（円・総額）、歩く速さは ゆっくり="slow"／少しゆっくり="slightly_slow"／少し急いで="slightly_fast"／急いで="fast"、子どもの年齢・身長は提示された表記のまま childrenAges に入れてください。`,
 ``,
 `【当日の対応ルール（厳守）】`,
 `・「当日は対応できません」「ご自身で調整をお願いします」のような、当日対応を断る言い方は絶対にしないでください。このアプリは当日のリスケジュールに対応します。`,
@@ -8931,6 +12866,7 @@ windowText,
 `・ユーザーが規準プランの特定のプラン（A/B/C）への変更（施設の追加・削除・入れ替えなど）を指示・相談し、その変更がまだ現在のプランに反映されていない場合、planChange に {slot: 対象プランのスロット, instruction: 変更内容を自己完結した文（対象プランと、追加/削除/変更する内容を具体的に。例:「プランBにセンター・オブ・ジ・アースを追加する」）} を入れてください。これは、開始が決まったときにセット全体ではなくそのプランだけを同じセット内で差し替えるために使います。`,
 `・変更の相談段階（まだ開始指示がない）でも、対象プランと変更内容が決まっていれば planChange に入れてください（開始するかどうかは wantsPlanGeneration で別に判定します）。ユーザーが後から「作り直して」とだけ言った場合も、直前のやり取りで決まった未反映の変更があれば、それを planChange に入れて引き継いでください。`,
 `・変更が特定のプランを対象としない場合（セット全体の作り直し、軸そのものの変更など）は planChange を null にしてください。当日の事実報告（DPAが取れなかった等）だけでは planChange に入れないでください。`,
+`・ただし、指示の内容が条件の値の変更（日付・パーク・人数・予算・入園／退園時刻・重視する点・歩く速さなど）を含む場合は、それは部分差し替えではありません。その変更は planChange ではなく conditionChanges に入れてください（上の【条件の変更点の受け渡しルール】参照）。プランの内容への変更と条件変更が同時に指示された場合も、内容の変更は planChange に、条件の変更は conditionChanges に、それぞれ入れてください（アプリ側では条件変更が優先され、変更後の条件での作り直しとして実行されます）。`,
 `・変更の相談への返信では、その変更が現在のプランに入っているかどうかを上の「実際の内容」で確認して答え、入っていない場合は「反映するにはそのプランの差し替えが必要です。ご希望の場合は『作り直して』とお伝えください」のように、言えば開始する言葉を正確に案内してください。`,
 ``,
 `【参照プランの規準ルール（厳守）】`,
@@ -8988,6 +12924,17 @@ priority: z.string().max(2000).nullable(),
 walkingSpeed: walkingSpeedEnum.nullable(),
 })
 .nullable(),
+// The structured condition CHANGES this instruction makes (see
+// 【条件の変更点の受け渡しルール】 in the prompt): only the fields
+// whose values change, with their new values — returned on EVERY
+// judgement kind whenever the instruction changes a condition
+// value. The server applies them to the target set's saved
+// conditions for a rebuild, reroutes a partial replacement that
+// carries them to a whole-set rebuild on the changed conditions,
+// and verifies the created set's stored conditions against them
+// before the start is announced. Null when the instruction
+// changes no condition value.
+conditionChanges: conditionChangesShape.nullable(),
 researchQuestion: z.string().nullable(),
 waitTimeSourcesInstruction: z.string().nullable(),
 // A decided, not-yet-reflected change targeting ONE plan of the
@@ -9022,8 +12969,22 @@ let verificationStarted: number | null = null;
 // plan means that plan, even if the conditions form currently
 // names another park/date.
 const isReschedule = result.generationKind === "reschedule";
+const pc = result.planChange;
+// Condition changes judged by the chat AI, normalized by the
+// server (unparseable values dropped; an all-empty judgement reads
+// as "no condition change"). Whenever the user's instruction
+// changes a condition VALUE, these are the new values — on any
+// judgement kind.
+const condChanges = normalizeConditionChanges(result.conditionChanges);
+// A partial replacement carrying condition changes is NOT run as a
+// partial replacement (owner's rule, 2026-11-20): changed
+// conditions redefine the whole set, so the run becomes a
+// whole-set rebuild on the changed conditions, even when the model
+// also returned a planChange.
 const explicitRebuild =
-result.generationKind === "rebuild" || isReschedule;
+result.generationKind === "rebuild" ||
+isReschedule ||
+(pc != null && condChanges != null);
 const rebuildTargetSet =
 explicitRebuild && referenceSet && referenceSet.status === "done"
 ? referenceSet
@@ -9036,13 +12997,15 @@ explicitRebuild && referenceSet && referenceSet.status === "done"
 // conversation — named in a recent user message, or the slot
 // selected in the open plan-set tab. A day-of reschedule is never
 // partial (it rebuilds the rest of the day as a set, as before).
-const pc = result.planChange;
+// A judgement carrying condition changes never routes here (see
+// explicitRebuild above).
 const recentUserTexts = recent
 .filter((m) => m.role === "user")
 .slice(0, 4)
 .map((m) => m.text);
 const partialChange =
 pc != null &&
+condChanges == null &&
 !isReschedule &&
 referenceSet != null &&
 referenceSet.status === "done" &&
@@ -9144,6 +13107,11 @@ wheelchairTexts.push(
 if (partialChange) {
 wheelchairTexts.push(
 `【決定済みの部分変更】\n${partialChange.instruction}`,
+);
+}
+if (condChanges) {
+wheelchairTexts.push(
+`【今回の指示による条件の変更点】\n${conditionChangesToText(condChanges)}`,
 );
 }
 if ((explicitRebuild || partialChange) && referenceSet) {
@@ -9253,14 +13221,35 @@ explicitRebuild && dayOf == null && changeMessages.length > 0
 // before the gate — the live form's current values (which used to
 // supply everything except park/date) play no part at all.
 const rebuildSeal = parseSnapshotConditions(rebuildTargetSet);
-const gateFindings = await judgeImpossibility(ctx, {
-park: rebuildTargetSet.park,
-visitDate: rebuildTargetSet.visitDate,
-entryTime: rebuildSeal.conditions.entryTime,
-exitTime: rebuildSeal.conditions.exitTime,
-budgetJpy: rebuildSeal.conditions.budgetJpy,
-adults: rebuildSeal.conditions.adults,
-children: rebuildSeal.conditions.children,
+// Condition changes judged by the chat AI are applied to the
+// target set's saved conditions HERE, deterministically, by the
+// server: the gate below judges the CHANGED conditions, and the
+// new set is created with them — never with the original
+// conditions plus a note. (2026-11-20 incident: a rebuild judged
+// from 「退園を19:30にして」 carried no change anywhere and
+// silently rebuilt on the original 19:00 exit time.)
+const appliedConditions = condChanges
+? applyConditionChanges(rebuildSeal.conditions, condChanges)
+: rebuildSeal.conditions;
+// Server-side verification, BEFORE anything starts: the sealed
+// conditions about to be used must actually carry every judged
+// change. A mismatch means the change would be lost — the start
+// is refused below and the reply says so; the original conditions
+// are never silently used instead.
+const sealMismatch = condChanges
+? conditionChangeMismatches(appliedConditions, condChanges)
+: [];
+const gateFindings =
+sealMismatch.length > 0
+? null
+: await judgeImpossibility(ctx, {
+park: appliedConditions.park,
+visitDate: appliedConditions.visitDate ?? rebuildTargetSet.visitDate,
+entryTime: appliedConditions.entryTime,
+exitTime: appliedConditions.exitTime,
+budgetJpy: appliedConditions.budgetJpy,
+adults: appliedConditions.adults,
+children: appliedConditions.children,
 requirements: [
 args.text,
 changeRequest ?? "",
@@ -9269,18 +13258,60 @@ dayOf?.userReport ?? "",
 .filter((s) => s.trim().length > 0)
 .join("\n"),
 });
-if (gateFindings) {
+if (sealMismatch.length > 0) {
+replyText = `条件の変更（${sealMismatch.join("、")}）を新しいプランに反映できませんでした。そのため、元の条件のまま作り直すことはせず、生成は開始していません。元のプランはそのまま残っています。お手数ですが、変更内容をもう一度お伝えください。`;
+} else if (gateFindings) {
 replyText = formatImpossibilityRejection(gateFindings);
 } else {
 const started = await startGeneration(
 ctx,
-rebuildSeal.conditions,
+appliedConditions,
 dayOf,
 explicitRebuild,
 rebuildTargetSet?.id ?? null,
 changeRequest,
 );
+// Server-side verification, AFTER the set exists: the created
+// set's STORED conditions (read back and parsed from its own
+// snapshot) must carry every judged change. If they do not, the
+// run is stopped — the created set is removed again, exactly as
+// a cancel removes a whole-set generation, so no generation
+// proceeds on the wrong conditions — and the reply says the
+// change could not be reflected. The original set stays
+// untouched throughout.
+const newSetRows = await db
+.select()
+.from(schema.planSets)
+.where(eq(schema.planSets.id, started.planSetId))
+.limit(1);
+const newSet = newSetRows[0];
+const storedMismatch =
+condChanges && newSet
+? conditionChangeMismatches(
+parseSnapshotConditions(newSet).conditions,
+condChanges,
+)
+: [];
+if (condChanges && (!newSet || storedMismatch.length > 0)) {
+const mismatchLabels =
+storedMismatch.length > 0 ? storedMismatch : ["条件"];
+await closeOpenRunLog(
+ctx,
+started.planSetId,
+"failed",
+`条件の変更（${mismatchLabels.join("、")}）が作成したセットの保存条件と一致しなかったため、開始を取り消した`,
+null,
+"cancelled",
+);
+await deletePlanSetRows(ctx, started.planSetId);
+replyText = `条件の変更（${mismatchLabels.join("、")}）を新しいプランに反映できませんでした。そのため、元の条件のまま作り直すことはせず、生成は開始していません。元のプランはそのまま残っています。お手数ですが、変更内容をもう一度お伝えください。`;
+} else {
 generationStarted = started.planSetId;
+// The conditions ACTUALLY used, built mechanically from the
+// created set's stored snapshot — never the model's paraphrase.
+const actualConditions = newSet
+? conditionsToText(parseSnapshotConditions(newSet).conditions)
+: conditionsToText(appliedConditions);
 // The acceptance reply is written from the ACTUAL start result, not
 // the model's draft (same rule as the not-started branch below). A
 // rebuild does not overwrite the original: a new set is created from
@@ -9289,8 +13320,9 @@ generationStarted = started.planSetId;
 // mismatch out explicitly — so a rebuild is announced in the words
 // of what the app really does.
 replyText = started.dayOf
-? `${waitedStartPrefix(startSection.waited)}承知しました。報告いただいた当日の状況をもとに、残りの時間のリスケジュールを作成します。（対象条件: ${setConditionsSummary(rebuildTargetSet)}）元のプランはそのまま残り、できたプランは新しいタブに表示されます。出来上がったら、このチャットで「終わりました」とお知らせします。${snapshotMissingNote(rebuildSeal.missing)}`
-: `${waitedStartPrefix(startSection.waited)}承知しました。既存のプラン「${started.rebuiltFromTitle ?? rebuildTargetSet.title}」をもとに、新しいプランを作成します。（対象条件: ${setConditionsSummary(rebuildTargetSet)}）元のプランはそのまま残り、できたプランは新しいタブに「作り直し版」として表示されます。出来上がったら、このチャットで「終わりました」とお知らせします。${snapshotMissingNote(rebuildSeal.missing)}`;
+? `${waitedStartPrefix(startSection.waited)}承知しました。報告いただいた当日の状況をもとに、残りの時間のリスケジュールを作成します。元のプランはそのまま残り、できたプランは新しいタブに表示されます。出来上がったら、このチャットで「終わりました」とお知らせします。\n【実際に使う条件】\n${actualConditions}${snapshotMissingNote(rebuildSeal.missing)}`
+: `${waitedStartPrefix(startSection.waited)}承知しました。既存のプラン「${started.rebuiltFromTitle ?? rebuildTargetSet.title}」をもとに、新しいプランを作成します。元のプランはそのまま残り、できたプランは新しいタブに「作り直し版」として表示されます。出来上がったら、このチャットで「終わりました」とお知らせします。\n【実際に使う条件】\n${actualConditions}${snapshotMissingNote(rebuildSeal.missing)}`;
+}
 }
 }
 } else {
@@ -9414,11 +13446,21 @@ walkingSpeed: cc?.walkingSpeed ?? "slightly_slow",
 });
 const started = await startGeneration(ctx, chatConditions);
 generationStarted = started.planSetId;
-// The acceptance reply is written from the conditions ACTUALLY
-// used (the chat-presented ones, now the set's snapshot), so the
-// user can see at a glance which date / park / party the run is
-// really for.
-replyText = `${waitedStartPrefix(startSection.waited)}承知しました。提示いただいた条件（${setConditionsSummary({ conditionsSnapshot: conditionsToText(chatConditions), park: chatConditions.park, visitDate: chatConditions.visitDate })}・予算${ccBudget.toLocaleString("ja-JP")}円・${ccEntryTime}入園〜${ccExitTime}退園）で、プランの作成を開始しました。出来上がったら新しいタブに表示され、このチャットで「終わりました」とお知らせします。`;
+// The acceptance reply carries the conditions ACTUALLY used,
+// built mechanically from the created set's stored snapshot (the
+// chat-presented ones, now sealed on the set) — date, park,
+// party, budget, entry/exit times, walking speed and the
+// 「重視する点」, never the model's paraphrase.
+const newSetRows = await db
+.select()
+.from(schema.planSets)
+.where(eq(schema.planSets.id, started.planSetId))
+.limit(1);
+const newSet = newSetRows[0];
+const actualConditions = newSet
+? conditionsToText(parseSnapshotConditions(newSet).conditions)
+: conditionsToText(chatConditions);
+replyText = `${waitedStartPrefix(startSection.waited)}承知しました。提示いただいた条件で、プランの作成を開始しました。出来上がったら新しいタブに表示され、このチャットで「終わりました」とお知らせします。\n【実際に使う条件】\n${actualConditions}`;
 }
 }
 }
@@ -9994,14 +14036,135 @@ args.slot === "A"
 ),
 ),
 );
+// 過程記録： a drafting report is the server's own observation
+// that the drafting phase has reached this plan — record the
+// phase boundary on the run's trail.
+await recordServerRunEvent(
+ctx,
+args.planSetId,
+{
+eventType: "phase_start",
+phase: "drafting",
+label: `プラン${args.slot}の下書き開始（進捗報告）`,
+},
+args.slot,
+);
 ctx.invalidateQueries();
 return { ok: true};
 },
 }),
 
+recordRunEvent: defineAction({
+description:
+"Internal: called by a long-running task (generation / same-day search / partial replacement) to append one timestamped event to its execution's process record （過程記録）: a phase boundary (phase_start / phase_end for 取得・ファクト構築・調査・下書き）, one fetch_start / fetch_end pair per read that leaves no snapshot (a sitemap it fetched directly, wait-time reference sites, crowd-forecast sources — never an official page: an official page's read is recorded by the server, on the server's clock, when its snapshot is saved), or one ai_call_start / ai_call_end pair per AI-driven step of its own, each with the step's label. Server-executed actions are NOT recorded through this action — the server brackets those itself into the open run (the storehouse reads and sync, planAcquisition / submitSitemap, saveSourceSnapshots, saveNormalizedFacts, saveRestaurantFacts, saveFacilities, saveAreaTravelTimes, getFacilityDictionary, and the plan saves), and a task-side pair for the same call would double-record it. The coverage is total — while the task is alive, some labelled step is always in progress, so no unlabelled gap exists between consecutive events. The record is how a run that stops midway can afterwards be pinpointed — where, and inside which call, it stopped. Recording never affects the run itself: when no run is open for the set (a stray or late report), it simply returns recorded=false.",
+request: z.object({
+planSetId: z.number(),
+slot: slotEnum.nullable().optional(),
+eventType: z.enum([
+"phase_start",
+"phase_end",
+"fetch_start",
+"fetch_end",
+"ai_call_start",
+"ai_call_end",
+"note",
+]),
+phase: z
+.enum(["acquisition", "fact_build", "research", "drafting", "save_verify"])
+.nullable()
+.optional(),
+label: z.string().min(1).max(500),
+detail: z.string().max(2000).nullable().optional(),
+}),
+response: z.object({ ok: z.literal(true), recorded: z.boolean()}),
+async handler(
+ctx,
+args,
+): Promise<{ ok: true; recorded: boolean}> {
+const runId = await findOpenRunId(ctx, args.planSetId, args.slot ?? null);
+if (runId == null) return { ok: true, recorded: false};
+await appendRunLogEvent(ctx, runId, {
+eventType: args.eventType,
+phase: args.phase ?? null,
+label: args.label,
+detail: args.detail ?? null,
+});
+return { ok: true, recorded: true};
+},
+}),
+
+getRunLog: defineAction({
+description:
+"Reads back the process records （過程記録） of every execution tied to one plan set — generation, same-day search, and partial replacements, oldest first — each with its full timestamped event trail (phase boundaries, per-fetch/read start/end, per-AI-call start/end with labels, every save attempt with its outcome — success, or the refusal's class and reason, including the recovery work after a refusal — and, where a step's end was never recorded, the explicit 「終了の記録なし」 marker the server added when the run closed) and, for a closed run, its outcome and close reason (the last completed phase, the step in progress, the elapsed time, and the reason — or an explicit 理由不明）. This is the read-back for diagnosing a run that stopped midway.",
+request: z.object({ planSetId: z.number()}),
+response: z.object({
+runs: z.array(
+z.object({
+id: z.number(),
+kind: z.enum(["generation", "same_day", "partial"]),
+slot: slotEnum.nullable(),
+status: z.enum(["open", "closed"]),
+outcome: z
+.enum(["succeeded", "failed", "cancelled", "interrupted"])
+.nullable(),
+startedAt: z.string(),
+closedAt: z.string().nullable(),
+closeReason: z.string().nullable(),
+lastCompletedPhase: z.string().nullable(),
+currentPhase: z.string().nullable(),
+events: z.array(
+z.object({
+at: z.string(),
+eventType: z.string(),
+phase: z.string().nullable(),
+label: z.string(),
+detail: z.string().nullable(),
+}),
+),
+}),
+),
+}),
+async handler(ctx, args) {
+const db = ctx.db<typeof schema>();
+const runRows = await db
+.select()
+.from(schema.runLogs)
+.where(eq(schema.runLogs.planSetId, args.planSetId))
+.orderBy(asc(schema.runLogs.id));
+const runs = [];
+for (const r of runRows) {
+const eventRows = await db
+.select()
+.from(schema.runLogEvents)
+.where(eq(schema.runLogEvents.runId, r.id))
+.orderBy(asc(schema.runLogEvents.id));
+runs.push({
+id: r.id,
+kind: r.kind,
+slot: r.slot,
+status: r.status,
+outcome: r.outcome,
+startedAt: r.startedAt.toISOString(),
+closedAt: r.closedAt? r.closedAt.toISOString(): null,
+closeReason: r.closeReason,
+lastCompletedPhase: r.lastCompletedPhase,
+currentPhase: r.currentPhase,
+events: eventRows.map((e) => ({
+at: e.at.toISOString(),
+eventType: e.eventType,
+phase: e.phase,
+label: e.label,
+detail: e.detail,
+})),
+});
+}
+return { runs};
+},
+}),
+
 saveSourceSnapshots: defineAction({
 description:
-"Internal: called by a generation / re-verification task to store the canonical official sources it just fetched — RAW, verbatim — as source_snapshots (kinds: dpa_page, facility_list, operations, show_schedule, ticket_prices, announcements). Snapshots are stored BEFORE anything reads facts from them; normalized facts (saveNormalizedFacts) may only cite text stored here, and their evidence excerpts are machine-checked against these stored texts. CANONICAL CONTRACT (spec §6.2.2): every snapshot MUST carry fetchMethod (how it was fetched — browser / text / script …); a save without it is refused by validation. Every snapshot SHOULD also carry a completeness declaration (completeness: expectationSource = page_declaration / sibling_source / history / none, expectation = the expected content derived from the source itself, result = passed / failed / not_derivable). Canonicality is decided by the SERVER, never by the task: canonical = 1 only when the fetch method records a REAL-BROWSER fetch (fetchMethod exactly \"browser\" — the page was opened in a live browser with all tabs switched and expansions opened; a GET / text-extraction / script fetch NEVER becomes canonical, however complete the text looks, because tabbed/expandable official pages cannot be fully obtained that way), a declaration was given, its result is passed, AND the server's own machine check found no mismatch AND at least one machine-verifiable ANCHOR in the text itself checked out — a declared section whose enumerated count the server recounts and matches: either a 「全N件」 section vs its priced items, or an unpriced enumeration declaration (「…一覧 N件」) vs its enumerated rows. A text carrying no machine-readable declaration at all never becomes canonical on a free-text declaration alone. Anything else is stored with canonical = 0 — the save itself is not refused; what is guaranteed is that a partial text is never silently canonical. The completenessNote records which anchors verified (or that there were none). Only canonical snapshots can ground normalized facts. Returns the new snapshot ids in payload order, plus `canonical` — a boolean array in the same order saying which snapshots became canonical. Saving a batch in multiple calls under the same batchId (at most 12 snapshots per call) is a legitimate procedure, and getSourceSnapshots reads back the whole batch (up to 200 snapshots).",
+"Internal: called by a generation / re-verification task to store the canonical official sources it just fetched — RAW, verbatim — as source_snapshots (kinds: dpa_page, facility_list, operations, show_schedule, ticket_prices, announcements, monthly_calendar, restaurant_list, restaurant_detail). A snapshot whose text came from the Cloudflare storehouse carries fetchMethod \"storehouse\" and sourceFetchedAt (the storehouse's own fetch time, ISO): the server stores that instant as the snapshot's fetchedAt and records the provenance in the completeness note; storehouse material NEVER becomes canonical (canonicality still requires exactly \"browser\"), and it must never be relabelled as an own browser fetch. Snapshots are stored BEFORE anything reads facts from them; normalized facts (saveNormalizedFacts) may only cite text stored here, and their evidence excerpts are machine-checked against these stored texts. CANONICAL CONTRACT (spec §6.2.2): every snapshot MUST carry fetchMethod (how it was fetched — browser / text / script …); a save without it is refused by validation. Every snapshot SHOULD also carry a completeness declaration (completeness: expectationSource = page_declaration / sibling_source / history / none, expectation = the expected content derived from the source itself, result = passed / failed / not_derivable). Canonicality is decided by the SERVER, never by the task: canonical = 1 only when the fetch method records a REAL-BROWSER fetch (fetchMethod exactly \"browser\" — the page was opened in a live browser with all tabs switched and expansions opened; a GET / text-extraction / script fetch NEVER becomes canonical, however complete the text looks, because tabbed/expandable official pages cannot be fully obtained that way), a declaration was given, its result is passed, AND the server's own machine check found no mismatch AND at least one machine-verifiable ANCHOR in the text itself checked out — a declared section whose enumerated count the server recounts and matches: either a 「全N件」 section vs its priced items, or an unpriced enumeration declaration (「…一覧 N件」) vs its enumerated rows. A text carrying no machine-readable declaration at all never becomes canonical on a free-text declaration alone. Anything else is stored with canonical = 0 — the save itself is not refused; what is guaranteed is that a partial text is never silently canonical. The completenessNote records which anchors verified (or that there were none). Only canonical snapshots can ground normalized facts. Returns the new snapshot ids in payload order, plus `canonical` — a boolean array in the same order saying which snapshots became canonical. Saving a batch in multiple calls under the same batchId (at most 12 snapshots per call) is a legitimate procedure, and getSourceSnapshots reads back the whole batch (up to 200 snapshots). READ-COMPLETION STAMPS: while a run is open, the server also stamps one 読み取り完了 record per saved snapshot into that run's process record (the page's kind and URL, on the server's clock) — the formal record of when that page's read completed. Save each page immediately after reading it, before reading the next page (never read several pages and batch-save them later): the stamps' order is the reading's progress, and a task-written start/end pair for a page read is not a record of the read. READ SEGMENTS: when the reading script passes readTimings with a snapshot (its own clock's stamps: open started / load completed / operations completed / text extracted), the server also records the read's segments into the run's process record — with the per-segment seconds it computes from the stamps — and stores the stamps with the snapshot's completeness note, so whether the time went to loading, to operations, or to extraction is readable from the record directly.",
 request: z.object({
 batchId: z.string().min(1).max(120),
 snapshots: z
@@ -10014,6 +14177,8 @@ kind: z.enum([
 "show_schedule",
 "ticket_prices",
 "announcements",
+"monthly_calendar",
+"restaurant_list",
 "restaurant_detail",
 ]),
 park: parkEnum,
@@ -10027,6 +14192,16 @@ rawText: z.string().min(1).max(1000000),
 // is stored but never becomes canonical. Report the method
 // honestly — labelling a GET fetch "browser" is fabrication.
 fetchMethod: z.string().min(1).max(60),
+// The instant the text was actually fetched from the official
+// site, when that differs from the save instant — set ONLY for
+// storehouse material (fetchMethod "storehouse"), to the
+// storehouse's own fetch time. The server stores it as the
+// snapshot's fetchedAt and records it in the completeness note,
+// so the material's fetch time and provenance (storehouse) stay
+// on the record. Never set it for an own fetch, and never use it
+// to make old material look fresh: it is the storehouse's
+// recorded fetch time, verbatim.
+sourceFetchedAt: z.string().max(40).nullable().optional(),
 // The task's completeness declaration: the expectation derived
 // from the source itself (its own declared counts / structure,
 // consistency with sibling sources, continuity with past
@@ -10046,6 +14221,26 @@ result: z.enum(["passed", "failed", "not_derivable"]),
 })
 .nullable()
 .optional(),
+// The reading script's own segment stamps for this page's
+// read (a program clock — the script that drove the real
+// browser — never the AI's self-report): when the page
+// started opening, when loading finished, when the required
+// operations (tab state check, "もっと見る" expansions, the
+// ticket page's scroll to the calendar part) finished (null
+// when the page needed no operations), and when the text
+// was extracted. The server records these segments into the
+// open run's process record at save time (with the segment
+// durations it computes from them) and stores the stamps
+// with the snapshot's completeness note.
+readTimings: z
+.object({
+openStartedAt: z.string().min(1).max(40),
+loadCompletedAt: z.string().min(1).max(40),
+operationsCompletedAt: z.string().min(1).max(40).nullable().optional(),
+textExtractedAt: z.string().min(1).max(40),
+})
+.nullable()
+.optional(),
 }),
 )
 .min(1)
@@ -10060,9 +14255,28 @@ async handler(
 ctx,
 args,
 ): Promise<{ ok: true; snapshotIds: number[]; canonical: boolean[] }> {
+return await withServerRunBracket(ctx, {
+kind: "ai_call",
+phase: "acquisition",
+label: "材料スナップショットの保存",
+startDetail: args.snapshots.length + "件: " + args.snapshots.map((s) => s.kind).join(", "),
+endDetail: (r) => r.snapshotIds.length + "件を保存（正典 " + r.canonical.filter((c) => c).length + "件）",
+}, async () => {
+
 const db = ctx.db<typeof schema>();
 const snapshotIds: number[] = [];
 const canonicalFlags: boolean[] = [];
+const savedInfos: {
+kind: string;
+url: string;
+title: string | null;
+segments: string | null;
+}[] = [];
+// Acquisition plan layer v3: a saved restaurant_detail snapshot
+// registers its URL as a leaf of the plan tree (the storehouse
+// circulation list is built from these leaves). Storehouse
+// material (fetchMethod "storehouse") keeps its source as the
+// leaf's provenance.
 for (const s of args.snapshots) {
 // Server-side machine check: the snapshot's own declared
 // section counts against the items it actually enumerates.
@@ -10099,6 +14313,8 @@ result: declared.result,
 }
 : null,
 fetchMethod: s.fetchMethod,
+readTimings: s.readTimings ?? null,
+sourceFetchedAt: s.sourceFetchedAt ?? null,
 browserFetched,
 machineCheck: {
 sectionsChecked: machine.checked,
@@ -10124,6 +14340,9 @@ serverNote:
 },
 canonical: isCanonical,
 });
+const sourceFetchedDate = s.sourceFetchedAt
+? new Date(s.sourceFetchedAt)
+: null;
 const inserted = await db
 .insert(schema.sourceSnapshots)
 .values({
@@ -10137,15 +14356,77 @@ batchId: args.batchId,
 fetchMethod: s.fetchMethod,
 canonical: isCanonical ? 1 : 0,
 completenessNote,
+...(sourceFetchedDate && !Number.isNaN(sourceFetchedDate.getTime())
+? { fetchedAt: sourceFetchedDate }
+: {}),
 })
 .returning({ id: schema.sourceSnapshots.id });
 const row = inserted[0];
 if (!row) throw new Error("saveSourceSnapshots: insert returned no rows");
 snapshotIds.push(row.id);
 canonicalFlags.push(isCanonical);
+savedInfos.push({
+kind: s.kind,
+url: s.url,
+title: s.title ?? null,
+segments: readSegmentDetail(s.readTimings ?? null),
+});
+if (s.kind === "restaurant_detail") {
+await upsertRestaurantLeaves(ctx, [
+{
+url: s.url,
+park: s.park,
+source:
+s.fetchMethod.trim().toLowerCase() === "storehouse"
+? ("storehouse" as const)
+: ("snapshot" as const),
+},
+]);
+}
+}
+// 読み取り完了の正式記録 (owner's rule, 2026-11-19): the server
+// stamps one completion record per saved page into the open
+// run — the page's kind and URL, on the SERVER's clock. A
+// task-written start/end pair for a page read is never the
+// record's basis (measured to disagree with the actual read
+// times: a read recorded as 160 seconds whose save landed
+// after the recorded end, and pages used with no read record
+// at all), so this stamp is the formal record of when each
+// page's read completed, and the stamps' order is the
+// reading's progress (tasks save each page immediately after
+// reading it). No open run: nothing is stamped. Recording
+// never breaks the save it observes.
+try {
+const openRun = await findAnyOpenRun(ctx);
+if (openRun != null) {
+const stampPhase: RunLogPhase =
+openRun.currentPhase != null &&
+openRun.currentPhase in RUN_PHASE_LABELS
+? (openRun.currentPhase as RunLogPhase)
+: "acquisition";
+for (const info of savedInfos) {
+await appendRunLogEvent(ctx, openRun.id, {
+eventType: "note",
+phase: stampPhase,
+label: `読み取り完了: ${info.kind}`,
+detail: info.title ? `${info.url}／${info.title}` : info.url,
+});
+if (info.segments != null) {
+await appendRunLogEvent(ctx, openRun.id, {
+eventType: "note",
+phase: stampPhase,
+label: `読み取りの区切り: ${info.kind}`,
+detail: info.segments,
+});
+}
+}
+}
+} catch {
+// The save's result stands regardless of the recording.
 }
 ctx.invalidateQueries();
 return { ok: true, snapshotIds, canonical: canonicalFlags };
+});
 },
 }),
 
@@ -10246,6 +14527,567 @@ completenessNote: r.completenessNote,
 },
 }),
 
+getAcquisitionPlan: defineAction({
+description:
+"Reads the acquisition plan layer v3: the plan tree built from the official sitemap (each node = page + operations + anchor, with its per-park branch presence in the sitemap the plan was built from), the plan's creation instant, and the sitemap basis of the skeleton comparison (the stored branch-restricted URL set, its size, and the sitemap's total URL count), plus the known restaurant detail leaves under the restaurant-list nodes. Calling it performs the same clock-only rebuild decision as planAcquisition (after the 3-hour expiry the plan is due for a rebuild and needsSitemap=true is reported; the rebuild itself happens when a fetching task submits the sitemap URL set through submitSitemap — the server never fetches the sitemap). Read-only with respect to every other table.",
+request: z.object({}),
+response: z.object({
+planState: z.enum(["fresh", "rebuild"]),
+planCreatedAt: z.string().nullable(),
+sitemapUrl: z.string(),
+sitemapUrls: z.array(z.string()),
+sitemapUrlCount: z.number(),
+sitemapTotalCount: z.number().nullable(),
+skeletonSameAsPrevious: z.boolean().nullable(),
+needsSitemap: z.boolean(),
+nodes: z.array(
+z.object({
+nodeKey: z.string(),
+scope: z.enum(["common", "park"]),
+kinds: z.array(z.string()),
+urlTemplate: z.string(),
+urlMatch: z.string(),
+stateFragmentLand: z.string().nullable(),
+stateFragmentSea: z.string().nullable(),
+operations: z.string(),
+anchor: z.string(),
+note: z.string().nullable(),
+branchParks: z.object({ land: z.boolean(), sea: z.boolean() }),
+}),
+),
+restaurantLeaves: z.array(
+z.object({
+url: z.string(),
+park: parkEnum,
+source: z.string(),
+lastSeenAt: z.string(),
+}),
+),
+commonRules: z.string(),
+}),
+async handler(ctx) {
+const db = ctx.db<typeof schema>();
+const plan = await ensureAcquisitionPlan(ctx, new Date());
+const leaves = await db
+.select()
+.from(schema.acquisitionRestaurantLeaves)
+.orderBy(
+asc(schema.acquisitionRestaurantLeaves.park),
+asc(schema.acquisitionRestaurantLeaves.url),
+);
+return {
+planState: plan.planState,
+planCreatedAt: plan.planCreatedAt
+? plan.planCreatedAt.toISOString()
+: null,
+sitemapUrl: SITEMAP_URL,
+sitemapUrls: plan.sitemapUrls.map(
+(p) => `https://www.tokyodisneyresort.jp${p}`,
+),
+sitemapUrlCount: plan.sitemapUrls.length,
+sitemapTotalCount: plan.sitemapTotalCount,
+skeletonSameAsPrevious: plan.skeletonSame,
+needsSitemap: plan.needsSitemap,
+nodes: plan.nodes.map((n) => ({
+nodeKey: n.nodeKey,
+scope: n.scope,
+kinds: n.kinds,
+urlTemplate: n.urlTemplate,
+urlMatch: n.urlMatch,
+stateFragmentLand: n.stateFragmentLand,
+stateFragmentSea: n.stateFragmentSea,
+operations: n.operations,
+anchor: n.anchor,
+note: n.note,
+branchParks: n.branchParks,
+})),
+restaurantLeaves: leaves.map((l) => ({
+url: l.url,
+park: l.park,
+source: l.source,
+lastSeenAt: l.lastSeenAt.toISOString(),
+})),
+commonRules:
+"共通規則：時計は1つ — 計画とスナップショットの有効期間は3時間。再計画の判定はサーバーが時計だけで行い、サーバー自身はサイトマップを取得しない。計画が期限切れのときは、取得タスクがサイトマップのURL集合を submitSitemap で渡し（原則として保管庫の写し＝getStorehouseSitemap。保管庫に無い場合だけタスク自身が直接取得する）、サーバーが枝の集合を比較して計画全体を作り直す（部分改訂はしない）。サイトマップが保管庫にも無くタスク側でも取れなかった場合は既存の計画の骨格のまま進め、作成時刻は進めない（次の回で作り直しが再試行される）。作り直しの際の取得はそのまま実行の材料になる。スクロールは全ノード不要。展開の終了条件は宣言件数と列挙の一致のみ。対象パークでない側は開かない。材料の再利用は「そのURLのスナップショットがあり、取得時刻が評価時刻から3時間以内」だけで判定し、正典かどうかには依存しない。対象日が評価時刻の当日なら、デイリーは鮮度に関係なく必ず取得する。レストラン一覧は保管庫のスナップショットから読むのが原則（保管庫に無ければ自前で取得）。レストラン詳細は一覧の下の葉で、取得は保管庫の束を原則とする。実行中に計画は変えない。",
+};
+},
+}),
+
+planAcquisition: defineAction({
+description:
+"The acquisition plan layer v3's deterministic decision function （立案）: for one park + target date, first settles the plan itself (fresh / rebuild — when the plan's 3 hours have expired the decision is made by the clock alone and the server fetches nothing itself: it returns planState=\"rebuild\" with needsSitemap=true, and the fetching task carries the sitemap URL set in through submitSitemap, which rebuilds the plan whole and returns this same decision shape; until a set is submitted, the decisions ride on the existing plan skeleton and the creation instant is not advanced), then decides per tree node whether the run FETCHES the page (returning the materialized URL and the node's operations) or REUSES a stored snapshot (returning its id and fetch time), or SKIPS the node (its branch is absent from the sitemap). Reuse is judged ONLY by snapshot existence and freshness: a snapshot of the node's URL fetched within 3 hours of atTime (default: server now; atTime exists so tests can evaluate at a chosen instant). Canonicality, fetch method and completeness declarations do NOT enter the decision. The daily node additionally requires its snapshots to be about targetDate, and when targetDate is the day of atTime the daily node is always fetched regardless of freshness. Restaurant detail leaves are not fetched by the run at all in principle: each is decided \"storehouse\" (read from the storehouse bundle). The restaurant_list node is storehouse-first too: with no fresh local snapshot its decision is \"storehouse\" (read the storehouse's snapshot of the list URL; fetch it with the own browser only when the storehouse holds none). There is no fact-build reuse: fact building always happens from the run's own material.",
+request: z.object({
+park: parkEnum,
+targetDate: z.string().min(10).max(10),
+atTime: z.string().max(40).optional(),
+}),
+response: planDecisionResponse,
+async handler(ctx, args) {
+return await withServerRunBracket(ctx, {
+kind: "ai_call",
+phase: "acquisition",
+label: "取得計画の判定",
+endDetail: (r) => "planState=" + r.planState + (r.needsSitemap ? "／needsSitemap=true" : ""),
+}, async () => {
+
+if (!isIsoDate(args.targetDate)) {
+throw new Error(
+"planAcquisition: targetDate は YYYY-MM-DD で指定してください。",
+);
+}
+const at = args.atTime ? new Date(args.atTime) : new Date();
+if (Number.isNaN(at.getTime())) {
+throw new Error(
+"planAcquisition: atTime が時刻として読めません。ISO形式で指定してください。",
+);
+}
+const plan = await ensureAcquisitionPlan(ctx, at);
+const decided = await computeAcquisitionDecisions(
+ctx,
+plan,
+args.park,
+args.targetDate,
+at,
+);
+return {
+park: args.park,
+targetDate: args.targetDate,
+atTime: at.toISOString(),
+planState: plan.planState,
+planCreatedAt: plan.planCreatedAt
+? plan.planCreatedAt.toISOString()
+: null,
+skeletonSameAsPrevious: plan.skeletonSame,
+needsSitemap: plan.needsSitemap,
+nodes: decided.nodes,
+restaurantLeaves: decided.restaurantLeaves,
+};
+});
+},
+}),
+
+submitSitemap: defineAction({
+description:
+"Carries the sitemap URL set from the fetching task into the acquisition plan layer v3 (the server never fetches the sitemap itself — owner's decision, 2026-11-19). Call it when planAcquisition returned planState=\"rebuild\" with needsSitemap=true: in principle pass the urls returned by getStorehouseSitemap (the storehouse's Browser Run fetch of the sitemap, Japanese pages only); only when the storehouse holds none, fetch https://www.tokyodisneyresort.jp/sitemap.xml plainly in the task's own environment, extract every <loc> URL, and pass those here. The server validates that every URL is on the official domain (any other URL rejects the whole submission), reduces the set to the branches the plan uses, compares it with the stored set (skeletonSameAsPrevious; null when no earlier set exists), persists the plan row, the whole node set, the sitemap URL set and the creation instant atomically, and returns exactly the same decision shape as planAcquisition (per-node fetch / reuse / storehouse), computed on the rebuilt tree.",
+request: z.object({
+urls: z.array(z.string().min(1).max(2048)).min(1).max(20000),
+park: parkEnum,
+targetDate: z.string().min(10).max(10),
+atTime: z.string().max(40).optional(),
+}),
+response: planDecisionResponse,
+async handler(ctx, args) {
+return await withServerRunBracket(ctx, {
+kind: "ai_call",
+phase: "acquisition",
+label: "サイトマップ提出と計画の作り直し",
+endDetail: (r) => "planState=" + r.planState + "／骨格の同一性=" + (r.skeletonSameAsPrevious == null ? "比較の基礎なし" : r.skeletonSameAsPrevious ? "同じ" : "変化あり"),
+}, async () => {
+
+if (!isIsoDate(args.targetDate)) {
+throw new Error(
+"submitSitemap: targetDate は YYYY-MM-DD で指定してください。",
+);
+}
+const at = args.atTime ? new Date(args.atTime) : new Date();
+if (Number.isNaN(at.getTime())) {
+throw new Error(
+"submitSitemap: atTime が時刻として読めません。ISO形式で指定してください。",
+);
+}
+const plan = await submitAcquisitionPlanSitemap(ctx, args.urls, at);
+const decided = await computeAcquisitionDecisions(
+ctx,
+plan,
+args.park,
+args.targetDate,
+at,
+);
+return {
+park: args.park,
+targetDate: args.targetDate,
+atTime: at.toISOString(),
+planState: plan.planState,
+planCreatedAt: plan.planCreatedAt
+? plan.planCreatedAt.toISOString()
+: null,
+skeletonSameAsPrevious: plan.skeletonSame,
+needsSitemap: plan.needsSitemap,
+nodes: decided.nodes,
+restaurantLeaves: decided.restaurantLeaves,
+};
+});
+},
+}),
+
+syncStorehouseUrls: defineAction({
+description:
+"Storehouse wiring, called at the start of every fetching turn: builds this run's circulation list — the sitemap URL FIRST, then the fixed 13 URLs (the DPA page's two per-park state URLs, the announcements page, and per park the attraction / show / monthly-calendar / ticket / restaurant-list pages), plus every known restaurant detail URL (learned from the storehouse's own registered list, this copy's stored restaurant_detail snapshots, and the leaf registry) — and POSTs it to the storehouse's /urls entrance (the storehouse sanity-gates the list itself: official domain only, 20–500 URLs). Also refreshes the restaurant leaf registry from what it learns. Never throws: a storehouse outage returns ok=false and the fetching turn proceeds without it.",
+request: z.object({}),
+response: z.object({
+ok: z.boolean(),
+posted: z.boolean(),
+count: z.number(),
+fixedCount: z.number(),
+detailCount: z.number(),
+storehouseListRead: z.boolean(),
+reason: z.string().nullable(),
+}),
+async handler(
+ctx,
+): Promise<{
+ok: boolean;
+posted: boolean;
+count: number;
+fixedCount: number;
+detailCount: number;
+storehouseListRead: boolean;
+reason: string | null;
+}> {
+return await withServerRunBracket(ctx, {
+kind: "fetch",
+phase: "acquisition",
+label: "保管庫へのURL一覧送信",
+endDetail: (r) => r.ok ? "送信 " + r.count + "件（固定 " + r.fixedCount + "件＋レストラン詳細 " + r.detailCount + "件）" : (r.reason ?? "送信できなかった"),
+}, async () => {
+
+const db = ctx.db<typeof schema>();
+const fixed = storehouseFixedUrls();
+const detailParks = new Map<string, "land" | "sea">();
+const leafRows = await db.select().from(schema.acquisitionRestaurantLeaves);
+for (const l of leafRows) detailParks.set(l.url, l.park);
+const snapRows = await db
+.select({
+url: schema.sourceSnapshots.url,
+park: schema.sourceSnapshots.park,
+})
+.from(schema.sourceSnapshots)
+.where(eq(schema.sourceSnapshots.kind, "restaurant_detail"));
+for (const s of snapRows) {
+if (!detailParks.has(s.url)) detailParks.set(s.url, s.park);
+}
+let storehouseListRead = false;
+const fromStorehouse: { url: string; park: "land" | "sea"; source: "storehouse" }[] =
+[];
+try {
+const res = await fetch(`${STOREHOUSE_BASE_URL}/status`, {
+signal: AbortSignal.timeout(20000),
+});
+if (res.ok) {
+const data: unknown = await res.json();
+const items =
+data != null && typeof data === "object"
+? (data as { items?: unknown }).items
+: undefined;
+if (Array.isArray(items)) {
+storehouseListRead = true;
+for (const item of items) {
+const url =
+item != null && typeof item === "object"
+? (item as { url?: unknown }).url
+: undefined;
+if (typeof url !== "string") continue;
+const park = parkOfDetailUrl(url);
+if (!park) continue;
+if (!detailParks.has(url)) detailParks.set(url, park);
+fromStorehouse.push({ url, park, source: "storehouse" });
+}
+}
+}
+} catch {
+storehouseListRead = false;
+}
+await upsertRestaurantLeaves(ctx, fromStorehouse);
+const urls = [...fixed, ...detailParks.keys()];
+const base = {
+posted: false,
+count: urls.length,
+fixedCount: fixed.length,
+detailCount: detailParks.size,
+storehouseListRead,
+};
+if (urls.length < 20 || urls.length > 500) {
+return {
+...base,
+ok: false,
+reason: `URL一覧が ${urls.length} 件で、保管庫の健全性ゲート（20〜500件）を満たさないため送信しませんでした。`,
+};
+}
+try {
+const res = await fetch(`${STOREHOUSE_BASE_URL}/urls`, {
+method: "POST",
+signal: AbortSignal.timeout(20000),
+headers: { "content-type": "application/json" },
+body: JSON.stringify({ urls }),
+});
+if (!res.ok) {
+return {
+...base,
+ok: false,
+reason: `保管庫がURL一覧を受け付けませんでした（HTTP ${res.status}）。`,
+};
+}
+} catch {
+return {
+...base,
+ok: false,
+reason: "保管庫へURL一覧を送信できませんでした（接続失敗）。",
+};
+}
+return { ...base, ok: true, posted: true, reason: null };
+});
+},
+}),
+
+getStorehouseRestaurants: defineAction({
+description:
+"Storehouse wiring: reads the restaurant detail bundle (GET /bundle/restaurants) — every restaurant detail text the storehouse has fetched so far, each with the storehouse's own fetch time. This bundle is the PRINCIPAL source for restaurant detail pages: a run saves the items it uses as restaurant_detail snapshots with fetchMethod \"storehouse\" and sourceFetchedAt = the item's fetchedAt, so the fetch time and the provenance (storehouse) stay on the record the facts are grounded in. Details absent from the bundle are fetched by the run's own browser as before. Returns available=false (never throws) when the storehouse has no bundle yet or cannot be reached. Also registers the bundle's URLs as restaurant leaves.",
+request: z.object({}),
+response: z.object({
+available: z.boolean(),
+updatedAt: z.string().nullable(),
+items: z.array(
+z.object({
+url: z.string(),
+park: parkEnum,
+fetchedAt: z.string(),
+text: z.string(),
+}),
+),
+}),
+async handler(
+ctx,
+): Promise<{
+available: boolean;
+updatedAt: string | null;
+items: {
+url: string;
+park: "land" | "sea";
+fetchedAt: string;
+text: string;
+}[] }> {
+return await withServerRunBracket(ctx, {
+kind: "fetch",
+phase: "acquisition",
+label: "保管庫: レストラン詳細の束",
+endDetail: (r) => r.available ? r.items.length + "件（束の更新時刻: " + (r.updatedAt ?? "不明") + "）" : "保管庫に束が無い、または接続できなかった",
+}, async () => {
+
+try {
+const res = await fetch(`${STOREHOUSE_BASE_URL}/bundle/restaurants`, {
+signal: AbortSignal.timeout(30000),
+});
+if (!res.ok) return { available: false, updatedAt: null, items: [] };
+const data: unknown = await res.json();
+if (data == null || typeof data !== "object") {
+return { available: false, updatedAt: null, items: [] };
+}
+const updatedAtRaw = (data as { updatedAt?: unknown }).updatedAt;
+const itemsRaw = (data as { items?: unknown }).items;
+const items: {
+url: string;
+park: "land" | "sea";
+fetchedAt: string;
+text: string;
+}[] = [];
+if (itemsRaw != null && typeof itemsRaw === "object") {
+for (const [url, v] of Object.entries(
+itemsRaw as Record<string, unknown>,
+)) {
+const park = parkOfDetailUrl(url);
+if (!park) continue;
+if (v == null || typeof v !== "object") continue;
+const fetchedAt = (v as { fetchedAt?: unknown }).fetchedAt;
+const text = (v as { text?: unknown }).text;
+if (typeof fetchedAt !== "string" || typeof text !== "string") {
+continue;
+}
+items.push({ url, park, fetchedAt, text });
+}
+}
+await upsertRestaurantLeaves(
+ctx,
+items.map((i) => ({ url: i.url, park: i.park, source: "storehouse" as const })),
+);
+return {
+available: true,
+updatedAt: typeof updatedAtRaw === "string" ? updatedAtRaw : null,
+items,
+};
+} catch {
+return { available: false, updatedAt: null, items: [] };
+}
+});
+},
+}),
+
+getStorehouseSnapshot: defineAction({
+description:
+"Storehouse wiring: reads one page's snapshot from the storehouse (GET /snapshot?url=) — the principal read for the restaurant_list node (decision \"storehouse\") and the LAST RESORT for any other page whose own browser fetch failed. Returns the stored text with the storehouse's own fetch time. SERVER-SIDE SAVE (owner's fix, 2026-11-20): when a text is found, the SERVER itself saves it at read time as a snapshot of the run — fetchMethod \"storehouse\", fetchedAt = the storehouse's own fetch time (recorded as sourceFetchedAt in the completeness note) — and returns its id as snapshotId; that snapshot IS the run's material for the page. The run does NOT save the text again via saveSourceSnapshots and must never record the page as unconfirmed for not having saved it; it checks the node's anchor against the returned text and never records storehouse material as its own browser fetch (storehouse material never becomes canonical — canonicality still requires exactly \"browser\"). snapshotId is null only when no snapshot could be saved (the URL's kind/park could not be determined, or the URL is a dated daily page — daily pages have no storehouse substitute and are never saved from the storehouse). found=false when the storehouse holds no snapshot for the URL (or cannot be reached — see error); the run then treats the page as not fetched, visibly, as before.",
+request: z.object({
+url: z.string().min(1).max(2000),
+}),
+response: z.object({
+found: z.boolean(),
+url: z.string(),
+fetchedAt: z.string().nullable(),
+text: z.string().nullable(),
+error: z.string().nullable(),
+snapshotId: z.number().nullable(),
+}),
+async handler(
+ctx,
+args,
+): Promise<{
+found: boolean;
+url: string;
+fetchedAt: string | null;
+text: string | null;
+error: string | null;
+snapshotId: number | null;
+}> {
+return await withServerRunBracket(ctx, {
+kind: "fetch",
+phase: "acquisition",
+label: "保管庫: スナップショット",
+startDetail: args.url,
+endDetail: (r) => r.found ? "保管庫の取得時刻: " + (r.fetchedAt ?? "不明") + (r.snapshotId != null ? "／この回のスナップショットとして保存済み（id=" + r.snapshotId + "）" : "／スナップショットとして保存されなかった（URLから種別・パークを特定できない、または日次ページのため）") : (r.error ?? "保管庫にスナップショットが無い"),
+}, async () => {
+
+try {
+const res = await fetch(
+`${STOREHOUSE_BASE_URL}/snapshot?url=${encodeURIComponent(args.url)}`,
+{ signal: AbortSignal.timeout(20000) },
+);
+if (res.status === 404) {
+return {
+found: false,
+url: args.url,
+fetchedAt: null,
+text: null,
+error: null,
+snapshotId: null,
+};
+}
+if (!res.ok) {
+return {
+found: false,
+url: args.url,
+fetchedAt: null,
+text: null,
+error: `保管庫がエラーを返しました（HTTP ${res.status}）。`,
+snapshotId: null,
+};
+}
+const data: unknown = await res.json();
+if (data == null || typeof data !== "object") {
+return {
+found: false,
+url: args.url,
+fetchedAt: null,
+text: null,
+error: "保管庫の応答が読めませんでした。",
+snapshotId: null,
+};
+}
+const fetchedAt = (data as { fetchedAt?: unknown }).fetchedAt;
+const text = (data as { text?: unknown }).text;
+if (typeof text !== "string") {
+return {
+found: false,
+url: args.url,
+fetchedAt: null,
+text: null,
+error: "保管庫のスナップショットに本文がありませんでした。",
+snapshotId: null,
+};
+}
+const storehouseFetchedAt =
+typeof fetchedAt === "string" ? fetchedAt : null;
+// The server saves what it read, at read time, as this
+// run's snapshot (fetchMethod "storehouse", the
+// storehouse's own fetch time) — the task's material no
+// longer depends on the task remembering to save it.
+const snapshotId = await saveStorehouseReadSnapshot(ctx, {
+url: args.url,
+text,
+fetchedAt: storehouseFetchedAt,
+});
+return {
+found: true,
+url: args.url,
+fetchedAt: storehouseFetchedAt,
+text,
+error: null,
+snapshotId,
+};
+} catch {
+return {
+found: false,
+url: args.url,
+fetchedAt: null,
+text: null,
+error: "保管庫へ接続できませんでした。",
+snapshotId: null,
+};
+}
+});
+},
+}),
+
+getStorehouseSitemap: defineAction({
+description:
+"Storehouse wiring: reads the sitemap URL set from the storehouse (GET /sitemap) — the storehouse fetches https://www.tokyodisneyresort.jp/sitemap.xml with Browser Run on its circulation and serves back the URL set restricted to Japanese pages, with the storehouse's own fetch time. This is the PRINCIPAL sitemap source for the acquisition plan layer v3: when planAcquisition returns planState=\"rebuild\" with needsSitemap=true, the fetching task calls this first and passes the returned urls to submitSitemap (this read's start/end, the storehouse provenance and its fetchedAt are recorded into the open run's process record by the server itself). Only when this returns null does the task fall back to fetching the sitemap directly in its own environment. Returns null (never throws) when the storehouse has not fetched the sitemap yet (404) or cannot be reached.",
+request: z.object({}),
+response: z
+.object({
+fetchedAt: z.string(),
+count: z.number(),
+urls: z.array(z.string()),
+})
+.nullable(),
+async handler(
+ctx,
+): Promise<{
+fetchedAt: string;
+count: number;
+urls: string[];
+} | null> {
+return await withServerRunBracket(ctx, {
+kind: "fetch",
+phase: "acquisition",
+label: "保管庫: サイトマップ",
+endDetail: (r) => r != null ? "保管庫の取得時刻: " + r.fetchedAt + "／" + r.count + "件" : "保管庫にサイトマップがまだ無い、または接続できなかった",
+}, async () => {
+
+void ctx;
+try {
+const res = await fetch(`${STOREHOUSE_BASE_URL}/sitemap`, {
+signal: AbortSignal.timeout(20000),
+});
+if (!res.ok) return null;
+const data: unknown = await res.json();
+if (data == null || typeof data !== "object") return null;
+const fetchedAt = (data as { fetchedAt?: unknown }).fetchedAt;
+const count = (data as { count?: unknown }).count;
+const urlsRaw = (data as { urls?: unknown }).urls;
+if (typeof fetchedAt !== "string" || !Array.isArray(urlsRaw)) {
+return null;
+}
+const urls = urlsRaw.filter(
+(u): u is string => typeof u === "string",
+);
+return {
+fetchedAt,
+count: typeof count === "number" ? count : urls.length,
+urls,
+};
+} catch {
+return null;
+}
+});
+},
+}),
 saveNormalizedFacts: defineAction({
 description:
 "Internal: registers one fact build — the AI read of stored source_snapshots, normalized to one DPA fact per facility — after machine validation: (a) every fact's evidence excerpt must be a VERBATIM substring of its referenced snapshot's stored raw text; (b) an eligible fact's price must appear in its excerpt; (c) any application-period date must appear in its excerpt; (d) unknown facts require a reason; not_eligible facts may instead be grounded in the mother-set (facility_list) snapshot via evidenceKind 'universe_listing' with an excerpt naming the facility. Completeness is checked against the mother set (universeNames, read from the build's facility_list snapshot — NEVER the facility dictionary): mother-set facilities with no fact are returned in `missing` and the build is stored as incomplete; an incomplete build can never pass a DPA row at the save gate. Filling the gaps (unknown + reason where a status cannot be read) and re-registering produces a new, complete build. CANONICAL GROUNDING (spec §6.2.2): only canonical snapshots (server-decided at saveSourceSnapshots time — fetch method recorded, completeness declared and passed, server machine check clean, and at least one machine-verifiable anchor in the text itself) may ground a fact build: a non-canonical mother-set snapshot refuses the registration outright, and a fact whose evidence snapshot is not canonical is refused through the per-fact error list. Re-fetch the source under the 3-step procedure and save it again so it becomes canonical, then register the facts. VALUE-FIDELITY DIFF GATE （値の忠実さ）: after the validations above pass, the server diffs every fact that exists non-unknown on BOTH sides against the park's latest complete, non-invalidated build (the baseline; a park's first build has no baseline and is not diffed). A differing unit price (both sides eligible) or a flipped eligibility status is accepted ONLY when the new fact's effectiveFrom is strictly newer than the baseline fact's (a non-null new effectiveFrom against a null or earlier baseline one) — the change is then recorded on the build (valueChanges) and returned in `valueDiff`. Without that justification the server knocks the fact down to unknown itself (price cleared, the submitted evidence kept, unknownReason naming the baseline value/status), records the knockdown, and the build is stored INCOMPLETE even when nothing is missing — so a silently rewritten value can never become canonical. The result is returned in `valueDiff` (baselineBuildId / valueChanges / knockedDown) and disclosed by getFactBuild.",
@@ -10303,7 +15145,57 @@ valueChanges: z.infer<typeof factValueChangeShape>[];
 knockedDown: z.infer<typeof factValueKnockdownShape>[];
 };
 }> {
+return await withServerRunBracket(ctx, {
+kind: "ai_call",
+phase: "fact_build",
+label: "ファクト構築",
+startDetail: args.park + "／母集合スナップショット id=" + args.universeSnapshotId,
+endDetail: (r) => r.complete ? "完全な構築として登録（構築 id=" + r.factBuildId + "）" : "未完成の構築として登録（不足: " + r.missing.join("、") + "）",
+}, async () => {
+
 const db = ctx.db<typeof schema>();
+// 構造化の区間 (owner's rule, 2026-11-19): the time spent
+// interpreting and structuring the fetched material is
+// measured ONLY on the server's clock — from the server's
+// last 読み取り完了 stamp in this run to this call's bracket
+// start (the instant the server received the structured
+// facts, server-stamped by withServerRunBracket just above).
+// The task's own start/end writings are never the basis.
+// Stated as one note, so the interval is readable from the
+// trail without trusting any task-side record.
+try {
+const openRun = await findAnyOpenRun(ctx);
+if (openRun != null) {
+const recent = await db
+.select()
+.from(schema.runLogEvents)
+.where(eq(schema.runLogEvents.runId, openRun.id))
+.orderBy(desc(schema.runLogEvents.id))
+.limit(80);
+const lastCompletion = recent.find((e) =>
+e.label.startsWith("読み取り完了:"),
+);
+const bracketStart = recent.find(
+(e) => e.eventType === "ai_call_start" && e.label === "ファクト構築",
+);
+if (lastCompletion && bracketStart) {
+const secs = Math.max(
+0,
+Math.round(
+(bracketStart.at.getTime() - lastCompletion.at.getTime()) / 1000,
+),
+);
+await appendRunLogEvent(ctx, openRun.id, {
+eventType: "note",
+phase: "fact_build",
+label: "ファクト構築の区間（サーバーの時刻）",
+detail: `最後の読み取り完了（${lastCompletion.at.toISOString()}）から、構造化した事実の保存をサーバーが受けた時刻（${bracketStart.at.toISOString()}）まで ${secs}秒。この区間はサーバーが打った記録だけで算出している。`,
+});
+}
+}
+} catch {
+// Recording never breaks the registration it observes.
+}
 const referencedIds = [
 ...new Set([
 args.universeSnapshotId,
@@ -10685,6 +15577,7 @@ valueChanges,
 knockedDown: valueDiffKnockdowns,
 },
 };
+});
 },
 }),
 
@@ -10819,7 +15712,7 @@ invalidatedReason: args.reason,
 
 saveRestaurantFacts: defineAction({
 description:
-"Internal: registers restaurant facts （レストラン事実レイヤー) — one facility's service type, reservation form (required = 予約必須 / ps = プライオリティ・シーティング対象 / none = 予約の経路なし / unknown = 未確認＋理由） and mobile order (available = 対象 / not_available = 対象外 / unknown = 未確認＋理由）, each grounded in that facility's OWN official restaurant detail page snapshot (kind \"restaurant_detail\", saved first via saveSourceSnapshots). The grounding snapshot MUST have been fetched with a real browser (fetchMethod \"browser\"): registration against a GET / text-extraction snapshot is refused — re-fetch the detail page in the browser and save it again first. Registration machine-checks, at the same level as saveNormalizedFacts: (a) the snapshot is a restaurant_detail snapshot of the same park; (b) every evidence excerpt is a VERBATIM substring of the snapshot's stored raw text; (c) a positive value's excerpt contains a phrase supporting it （予約必須系／プライオリティ・シーティング／モバイルオーダー対象） — a classification inferred from a label (e.g. \"show restaurant, therefore required\") can never pass, because the supporting phrase must be IN the excerpt; (d) a negative value (none / not_available) is grounded either by an excerpt stating non-availability (mobile order only) or by ABSENCE: evidenceKind \"absence\" with an excerpt naming the facility, whereupon the SERVER re-verifies against the full snapshot text that none of the axis's presence markers occur in it, and records the checked marker list on the fact; (e) an unknown value requires a reason and an excerpt naming the facility — unknown is never silently folded into none / not_available; (f) a stated serviceType must appear verbatim in the snapshot text. Facts are valid for 180 days; the plan screen and the PDF derive a restaurant row's display from the newest valid fact. A facility whose official list carries a separate sub-entry (e.g. a show-dining area listed apart from the main restaurant) is registered as its OWN fact under its own official name, grounded in its own page — never merged into the main facility's fact.",
+"Internal: registers restaurant facts （レストラン事実レイヤー) — one facility's service type, reservation form (required = 予約必須 / ps = プライオリティ・シーティング対象 / none = 予約の経路なし / unknown = 未確認＋理由） and mobile order (available = 対象 / not_available = 対象外 / unknown = 未確認＋理由）, each grounded in that facility's OWN official restaurant detail page snapshot (kind \"restaurant_detail\", saved first via saveSourceSnapshots). The grounding snapshot MUST have been fetched browser-grade: fetchMethod \"browser\" (this copy's own real browser) or \"storehouse\" (the Cloudflare storehouse's Browser Run fetch — restaurant details are storehouse-first, and the snapshot's recorded fetchMethod + sourceFetchedAt are the fact's provenance); registration against a GET / text-extraction snapshot is refused. Registration machine-checks, at the same level as saveNormalizedFacts: (a) the snapshot is a restaurant_detail snapshot of the same park; (b) every evidence excerpt is a VERBATIM substring of the snapshot's stored raw text; (c) a positive value's excerpt contains a phrase supporting it （予約必須系／プライオリティ・シーティング／モバイルオーダー対象） — a classification inferred from a label (e.g. \"show restaurant, therefore required\") can never pass, because the supporting phrase must be IN the excerpt; (d) a negative value (none / not_available) is grounded either by an excerpt stating non-availability (mobile order only) or by ABSENCE: evidenceKind \"absence\" with an excerpt naming the facility, whereupon the SERVER re-verifies against the full snapshot text that none of the axis's presence markers occur in it, and records the checked marker list on the fact; (e) an unknown value requires a reason and an excerpt naming the facility — unknown is never silently folded into none / not_available; (f) a stated serviceType must appear verbatim in the snapshot text. Facts are valid for 180 days; the plan screen and the PDF derive a restaurant row's display from the newest valid fact. A facility whose official list carries a separate sub-entry (e.g. a show-dining area listed apart from the main restaurant) is registered as its OWN fact under its own official name, grounded in its own page — never merged into the main facility's fact.",
 request: z.object({
 park: parkEnum,
 facts: z
@@ -10844,6 +15737,13 @@ async handler(
 ctx,
 args,
 ): Promise<{ ok: true; saved: number; factIds: number[] }> {
+return await withServerRunBracket(ctx, {
+kind: "ai_call",
+phase: "fact_build",
+label: "レストランファクト登録",
+endDetail: (r) => r.saved + "件を登録",
+}, async () => {
+
 const factIds: number[] = [];
 for (const f of args.facts) {
 const reservationType = f.reservation.type;
@@ -10889,6 +15789,7 @@ unknownReason: f.mobileOrder.unknownReason ?? null,
 }
 ctx.invalidateQueries();
 return { ok: true, saved: factIds.length, factIds };
+});
 },
 }),
 
@@ -10964,6 +15865,15 @@ args.status === "done"
 ? `レストラン分類の訂正が終わりました。${args.text}`
 : `レストラン分類の訂正は完了できませんでした。${args.text}`,
 });
+// 裏タスク管理： the report is posted — the correction's normal
+// completion (whether it reports done or failed), and the
+// manager run's "finished" mark; the manager does not retry a
+// reported end.
+await mgrFinishRunForTarget(
+ctx,
+{ type: "restaurant_correction" },
+"finished",
+);
 ctx.invalidateQueries();
 return { ok: true as const };
 },
@@ -10971,7 +15881,7 @@ return { ok: true as const };
 
 applyRestaurantFactCorrection: defineAction({
 description:
-"Internal one-time correction (owner's instruction, 2026-11-16): rebuilds the ケープコッド・クックオフ classification on the restaurant fact layer. The facility dictionary's legacy column wrongly recorded the main restaurant as 予約必須 — inferred from its \"show restaurant\" label — while its own official detail page states no reservation requirement (counter service, Disney Mobile Order available); only the separately-listed ケープコッド・クックオフ（ショーダイニングエリア） requires a reservation. When the corrected facts are not yet registered, this action spawns a background task that reads both official detail pages, stores each verbatim as a restaurant_detail snapshot, and registers the grounded facts through saveRestaurantFacts' machine validation (main: reservation none by server-verified marker absence over the full page text + mobile available by excerpt; show-dining area: reservation required by excerpt + mobile not_available by absence), adds the show-dining area to the facility dictionary as its own entry when missing, and reports back via reportRestaurantFactCorrection. Idempotent: when both facilities already carry current facts with the corrected values, no task is spawned. No plan, plan item, message or other business row is ever written by this action itself.",
+"Internal one-time correction (owner's instruction, 2026-11-16): rebuilds the ケープコッド・クックオフ classification on the restaurant fact layer. The facility dictionary's legacy column wrongly recorded the main restaurant as 予約必須 — inferred from its \"show restaurant\" label — while its own official detail page states no reservation requirement (counter service, Disney Mobile Order available); only the separately-listed ケープコッド・クックオフ（ショーダイニングエリア） requires a reservation. When the corrected facts are not yet registered, this action spawns a background task that reads both official detail pages, stores each verbatim as a restaurant_detail snapshot, and registers the grounded facts through saveRestaurantFacts' machine validation (main: reservation none by server-verified marker absence over the full page text + mobile available by excerpt; show-dining area: reservation required by excerpt + mobile not_available by absence), adds the show-dining area to the facility dictionary as its own entry when missing, and reports back via reportRestaurantFactCorrection. Idempotent: when both facilities already carry current facts with the corrected values, no task is spawned. No plan, plan item, message or other business row is ever written by this action itself. The task starts through the task manager （裏タスク管理クラス, kind 17) like every production background task — retries re-run the same correction, and if the attempts are exhausted the failure surfaces as an in-app dialog carrying the common congestion text.",
 request: z.object({}),
 response: z.object({
 ok: z.literal(true),
@@ -10981,65 +15891,13 @@ alreadyCorrect: z.array(z.string()),
 async handler(
 ctx,
 ): Promise<{ ok: true; spawned: boolean; alreadyCorrect: string[] }> {
-const alreadyCorrect: string[] = [];
-const main = await findCurrentRestaurantFact(
-ctx,
-"sea",
-"ケープコッド・クックオフ",
-);
-if (
-main &&
-main.reservationType === "none" &&
-main.mobileOrder === "available"
-) {
-alreadyCorrect.push("ケープコッド・クックオフ");
-}
-const showArea = await findCurrentRestaurantFact(
-ctx,
-"sea",
-"ケープコッド・クックオフ（ショーダイニングエリア）",
-);
-if (
-showArea &&
-showArea.reservationType === "required" &&
-showArea.mobileOrder === "not_available"
-) {
-alreadyCorrect.push("ケープコッド・クックオフ（ショーダイニングエリア）");
-}
+const alreadyCorrect = await restaurantCorrectionRegistered(ctx);
 if (alreadyCorrect.length === 2) {
 return { ok: true as const, spawned: false, alreadyCorrect };
 }
-const assignment = `【レストラン分類の訂正タスク（一回限り）】
-施設辞書の旧来の列に、ケープコッド・クックオフ本体が「予約必須」と誤って記録されています（「ショーレストラン」というラベルからの推測が原因）。レストランの分類は、施設自身の公式レストラン詳細ページの記述から、根拠つきのファクトとして登録し直すのがこのタスクです。推測で分類を作ることは絶対にしないでください。ページの実文が下記の想定と違う場合は、想定を押し通さず、実文が裏づける分類で登録し、その旨を報告してください。
-
-手順:
-1. 公式ページ https://www.tokyodisneyresort.jp/tds/restaurant/detail/446/ （ケープコッド・クックオフ本体）をブラウザで開き、全文を読む。読む前に、saveSourceSnapshots アクションで生テキストのまま保存すること（batchId は "restaurant-correction-2026-11-16"、kind は "restaurant_detail"、park は "sea"、url は開いたページのURLそのまま、title はページのタイトル、fetchMethod は "browser"、completeness は {expectationSource: "none", expectation: "レストラン詳細ページには件数宣言が無いため、完全性の期待値は導けない", result: "not_derivable"}）。返ってきた snapshotIds の、このページの id を控える。
-2. saveRestaurantFacts アクション（park="sea"）で、本体のファクトを登録する:
-   - name: "ケープコッド・クックオフ"
-   - serviceType: ページの「サービスタイプ」の表記そのまま（「カウンターサービス」の想定。ページの表記が違えばそちらを使う）
-   - snapshotId: 手順1の id
-   - reservation: {type: "none", evidenceKind: "absence", evidence: ページ内で施設名を含む一節（ページ冒頭の施設名の行など、保存したスナップショット本文から一字も変えずに切り取る）} —— 不在の根拠はサーバーが全文で機械確認します。もし登録が「存在マーカーがある」と拒否されたら、そのマーカーが示す分類がページの実態です。想定を押し通さず、実文が裏づける分類（required/ps/unknown＋理由）で登録し直し、報告に明記してください。
-   - mobileOrder: {type: "available", evidenceKind: "excerpt", evidence: 「ディズニー・モバイルオーダー対象」と書かれた一節（保存した本文から逐語で切り取る）}
-3. 公式ページ https://www.tokyodisneyresort.jp/tds/restaurant/detail/447/ （ケープコッド・クックオフ（ショーダイニングエリア））も同じ手順で開いて保存し（batchId は同じ）、ファクトを登録する:
-   - name: "ケープコッド・クックオフ（ショーダイニングエリア）"
-   - serviceType: ページにサービスタイプの表記があればそのまま、無ければ null
-   - reservation: {type: "required", evidenceKind: "excerpt", evidence: 予約が必要だと書かれた一節（「ショーレストランのご利用には予約が必要です」の想定。ページの実文から逐語で切り取る）}
-   - mobileOrder: ページにモバイルオーダーの記載が一切無ければ {type: "not_available", evidenceKind: "absence", evidence: 施設名を含む一節}。記載があれば実文が裏づける分類で登録する。
-4. getFacilityDictionary（park="sea"）で施設辞書を確認し、ケープコッド・クックオフ（ショーダイニングエリア）のエントリが無ければ、saveFacilities（park="sea"）で {name, area: ページのエリア表記, officialUrl: 手順3のURL} だけを保存して別エントリとして追加する（分類のフィールド reservationType/mobileOrder は渡さないこと。分類はファクトの専管）。
-5. 最後に必ず reportRestaurantFactCorrection アクションを1回呼ぶ。成功したら status="done"、text には登録した内容（施設ごとに予約形態とモバイルオーダーの値、根拠にしたページ）を短く書く。途中でどうしても登録できない場合は status="failed"、text に理由を書く。黙って終わらないこと。
-
-注意: プラン・プランの行・メッセージ等の業務データは一切変更しないこと。このタスクが書くのは、スナップショット2件、ファクト2件、（必要なら）施設辞書のショーダイニングエリアのエントリ1件だけです。`;
-const spawned = await ctx.agent.spawnTask(assignment, {
-expectsAction: "reportRestaurantFactCorrection",
-dedupeKey: "restaurant-fact-correction-2026-11-16",
-});
-if (!spawned.ok) {
-throw new Error(
-"applyRestaurantFactCorrection: 訂正タスクを開始できませんでした。",
-);
-}
+const spawned = await spawnRestaurantCorrectionAttempt(ctx);
 ctx.invalidateQueries();
-return { ok: true as const, spawned: true, alreadyCorrect };
+return { ok: true as const, spawned, alreadyCorrect };
 },
 }),
 
@@ -11268,21 +16126,42 @@ const set = setRows[0];
 if (!set) {
 throw new Error(`savePlanSet: plan set ${args.planSetId} not found`);
 }
+// 過程記録： EVERY save attempt is bracketed by the server itself
+// — this call's phase_start IS the attempt's start, and every exit
+// below records the attempt's outcome on the trail: the success
+// phase_end, or a note carrying the refusal's class and reason
+// (plan-count contract, class-11 floor, verification gate). A
+// refusal NEVER closes the run: the task's recovery work after it
+// (re-fetching the missing page, re-saving) belongs to the same
+// run, which closes only at the task's true end — the successful
+// save below, a failure report, or the watchdog / sweep.
+await recordServerRunEvent(ctx, args.planSetId, {
+eventType: "phase_start",
+phase: "save_verify",
+label: "保存・検証の開始（savePlanSet）",
+});
 // Plan-count contract, decided by the set's creation route: a
 // standard set is exactly the three plans A/B/C; a 当日検索 set is
 // exactly ONE plan (slot A) — the emergency entry deliberately
 // produces a single usable plan, not three variants.
 const isSameDaySet = set.setType === "same_day";
-if (isSameDaySet) {
-if (args.plans.length !== 1 || args.plans[0]?.slot !== "A") {
-throw new Error(
-"savePlanSet: 当日検索のプランセットには、プランAを1件だけ保存してください（プランB・Cは作らないこと）。",
-);
-}
-} else if (args.plans.length !== 3) {
-throw new Error(
-"savePlanSet: 通常のプランセットにはプランA・B・Cの3件が必要です。",
-);
+const planCountError = isSameDaySet
+? args.plans.length !== 1 || args.plans[0]?.slot !== "A"
+? "savePlanSet: 当日検索のプランセットには、プランAを1件だけ保存してください（プランB・Cは作らないこと）。"
+: null
+: args.plans.length !== 3
+? "savePlanSet: 通常のプランセットにはプランA・B・Cの3件が必要です。"
+: null;
+if (planCountError) {
+// 過程記録： this attempt's outcome goes on the trail before the
+// refusal propagates; the run stays open for the task's fix.
+await recordServerRunEvent(ctx, args.planSetId, {
+eventType: "note",
+phase: "save_verify",
+label: "保存試行の結果：拒否（プラン件数の契約）",
+detail: planCountError,
+});
+throw new Error(planCountError);
 }
 
 // Restaurant waits are not modeled (owner design, 記録AD): a
@@ -11388,6 +16267,20 @@ progressC: "failed",
 verificationJson: JSON.stringify(floorRecord),
 })
 .where(eq(schema.planSets.id, set.id));
+// 過程記録： the class-11 refusal is recorded as this attempt's
+// outcome, and the run is NOT closed here (owner's rule,
+// 2026-11-19: a run closes only at the task's true end). The set
+// is marked failed as before, but the task may still recover —
+// re-fetch what was missing and re-save — and that recovery
+// belongs to this same run; if the task instead reports failure
+// or dies, reportPlanFailure / the getState sweep closes the run
+// as failed with this reason on the trail.
+await recordServerRunEvent(ctx, set.id, {
+eventType: "note",
+phase: "save_verify",
+label: "保存試行の結果：拒否（クラス11：プランの最低内容不足）",
+detail: reason,
+});
 if (wasGenerating) {
 await db.insert(schema.messages).values({
 role: "assistant",
@@ -12037,7 +16930,7 @@ violations.push(
 ...ticketLinePartyViolations(
 plan.slot,
 plan.costBreakdown,
-set.setType === "same_day" && set.sameDayAdults != null
+isSameDaySet && set.sameDayAdults != null
 ? { adults: set.sameDayAdults, children: set.sameDayChildren ?? 0 }
 : (snapshotParty ??
 (formParty
@@ -12048,6 +16941,15 @@ args.ticketPrices,
 );
 }
 if (violations.length > 0) {
+// 過程記録： record this attempt's outcome (the gate's classes
+// and reasons ride in the violation texts themselves) before the
+// refusal propagates; the run stays open for the recovery.
+await recordServerRunEvent(ctx, args.planSetId, {
+eventType: "note",
+phase: "save_verify",
+label: "保存試行の結果：拒否（検証ゲート）",
+detail: violations.slice(0, 10).join("\n- "),
+});
 throw new Error(
 `保存できませんでした。次の問題を直して、もう一度 savePlanSet を呼んでください（失敗報告はしないこと）:\n- ${violations.slice(0, 10).join("\n- ")}`,
 );
@@ -12600,6 +17502,14 @@ text: hasSpecSuspectUnverified(unverifiedAll)
 : completionText,
 });
 }
+// 過程記録： the save succeeded — end the save/verify phase and
+// close the run as succeeded.
+await recordServerRunEvent(ctx, args.planSetId, {
+eventType: "phase_end",
+phase: "save_verify",
+label: "保存・検証の終了（savePlanSet）",
+});
+await closeOpenRunLog(ctx, args.planSetId, "succeeded", null, null, "finished");
 ctx.invalidateQueries();
 return { ok: true};
 },
@@ -12752,7 +17662,33 @@ const set = setRows[0];
 if (!set) {
 throw new Error(`savePlanReplacement: plan set ${args.planSetId} not found`);
 }
+// 過程記録： EVERY save attempt is bracketed by the server itself,
+// like savePlanSet — this phase_start IS the attempt's start, and
+// every exit records the attempt's outcome (success phase_end, or
+// a note with the refusal's class and reason). A refusal never
+// closes the run; it closes only at the task's true end.
+await recordServerRunEvent(
+ctx,
+args.planSetId,
+{
+eventType: "phase_start",
+phase: "save_verify",
+label: "保存・検証の開始（savePlanReplacement）",
+},
+args.slot,
+);
 if (set.status!== "done") {
+await recordServerRunEvent(
+ctx,
+args.planSetId,
+{
+eventType: "note",
+phase: "save_verify",
+label: "保存試行の結果：拒否（対象セットが完了状態ではない）",
+detail: `savePlanReplacement: plan set ${args.planSetId} is not a finished set`,
+},
+args.slot,
+);
 throw new Error(
 `savePlanReplacement: plan set ${args.planSetId} is not a finished set`,
 );
@@ -12764,6 +17700,19 @@ const planRows = await db
 .orderBy(asc(schema.plans.id));
 const planRow = planRows.find((p) => p.slot === args.slot);
 if (!planRow) {
+// 過程記録： record this attempt's outcome before the refusal
+// propagates (the run stays open; see savePlanSet).
+await recordServerRunEvent(
+ctx,
+args.planSetId,
+{
+eventType: "note",
+phase: "save_verify",
+label: "保存試行の結果：拒否（対象プランが存在しない）",
+detail: `savePlanReplacement: plan ${args.slot} not found in set ${args.planSetId}`,
+},
+args.slot,
+);
 throw new Error(
 `savePlanReplacement: plan ${args.slot} not found in set ${args.planSetId}`,
 );
@@ -12783,6 +17732,19 @@ args.slot === "A"
 ? set.progressB
 : set.progressC;
 if (slotProgressNow === "done") {
+// 過程記録： record this attempt's outcome before the refusal
+// propagates (the run stays open; see savePlanSet).
+await recordServerRunEvent(
+ctx,
+args.planSetId,
+{
+eventType: "note",
+phase: "save_verify",
+label: "保存試行の結果：拒否（差し替えが進行中ではない）",
+detail: `savePlanReplacement: プラン${args.slot}の差し替えは進行中ではありません（取り消されたか、既に終了しています）。この保存は受け付けられません。`,
+},
+args.slot,
+);
 throw new Error(
 `savePlanReplacement: プラン${args.slot}の差し替えは進行中ではありません（取り消されたか、既に終了しています）。この保存は受け付けられません。`,
 );
@@ -12896,6 +17858,20 @@ await db.insert(schema.messages).values({
 role: "assistant",
 text: `「${set.title}」のプラン${slot}の差し替えは保存されませんでした。（対象条件: ${setConditionsSummary(set)}／理由: ${reason}）元のプラン${slot}はそのまま残っています。`,
 });
+// 過程記録： a class-11 refusal within a partial replacement is
+// NOT terminal (the task may fix and re-save in this operation),
+// so the run stays open; the refusal itself goes on the trail.
+await recordServerRunEvent(
+ctx,
+set.id,
+{
+eventType: "note",
+phase: "save_verify",
+label: "保存試行の結果：拒否（クラス11：プランの最低内容不足）",
+detail: reason,
+},
+slot,
+);
 ctx.invalidateQueries();
 throw new Error(
 `保存できませんでした。${reason} 元のプラン${slot}は変更されていません。最低内容を満たすプランを作れない場合は、reportPlanReplacementFailure で理由を報告してください。`,
@@ -13369,23 +18345,34 @@ violations.push(
 `プラン${slot}: 費用合計（${plan.estimatedCostJpy.toLocaleString("ja-JP")}円）が、条件の予算（${snapshotBudgetJpy.toLocaleString("ja-JP")}円）を超えているのに、予算超過の開示が提出に含まれていません（予算対応の不一致・クラス13）。予算超過を開示する文面を budgetDisclosure として渡し、同じ開示をプランの説明（summary）にも含めて再保存してください。予算内に収まる場合は、合計が予算以下になるよう組み直してください。`,
 );
 }
-
 // Class 12 — the ticket line of the breakdown must be costed for
 // THIS set's snapshot party (spec §9.2), same rule as savePlanSet.
 violations.push(
 ...ticketLinePartyViolations(
 slot,
 plan.costBreakdown,
-set.setType === "same_day" && set.sameDayAdults != null
-? { adults: set.sameDayAdults, children: set.sameDayChildren ?? 0 }
-: (snapshotParty ??
+snapshotParty ??
 (formParty
 ? { adults: formParty.adults, children: formParty.children }
-: null)),
+: null),
 args.ticketPrices,
 ),
 );
 if (violations.length > 0) {
+// 過程記録： record this attempt's outcome (the gate's classes
+// and reasons ride in the violation texts themselves) before the
+// refusal propagates; the run stays open for the recovery.
+await recordServerRunEvent(
+ctx,
+args.planSetId,
+{
+eventType: "note",
+phase: "save_verify",
+label: "保存試行の結果：拒否（検証ゲート）",
+detail: violations.slice(0, 10).join("\n- "),
+},
+slot,
+);
 throw new Error(
 `保存できませんでした。次の問題を直して、もう一度 savePlanReplacement を呼んでください（失敗報告はしないこと）:\n- ${violations.slice(0, 10).join("\n- ")}`,
 );
@@ -13842,6 +18829,19 @@ text: hasSpecSuspectUnverified(unverifiedAll)
 : `プラン${slot}の差し替えが終わりました。「${set.title}」のプラン${slot}に変更が反映されています。他のプランはそのままです。`,
 });
 }
+// 過程記録： the replacement landed — end the save/verify phase
+// and close this slot's run as succeeded.
+await recordServerRunEvent(
+ctx,
+set.id,
+{
+eventType: "phase_end",
+phase: "save_verify",
+label: "保存・検証の終了（savePlanReplacement）",
+},
+slot,
+);
+await closeOpenRunLog(ctx, set.id, "succeeded", null, slot, "finished");
 ctx.invalidateQueries();
 return { ok: true};
 },
@@ -13891,6 +18891,8 @@ role: "assistant",
 text: `プラン${args.slot}の差し替えはできませんでした。（理由: ${args.error}）元のプラン${args.slot}はそのまま残っています。`,
 });
 }
+// 過程記録： close this slot's run with the reported reason.
+await closeOpenRunLog(ctx, args.planSetId, "failed", args.error, args.slot, "finished");
 ctx.invalidateQueries();
 return { ok: true};
 },
@@ -13930,6 +18932,14 @@ imageFresh: z.boolean(),
 ),
 }),
 async handler(ctx, args) {
+return await withServerRunBracket(ctx, {
+kind: "ai_call",
+phase: "acquisition",
+label: "施設辞書の確認",
+startDetail: args.park,
+endDetail: (r) => r.entries.length + "件",
+}, async () => {
+
 const db = ctx.db<typeof schema>();
 const rows = await db
 .select()
@@ -13986,6 +18996,7 @@ imageFresh: fresh.imageFresh,
 });
 }
 return { entries };
+});
 },
 }),
 
@@ -14029,6 +19040,13 @@ async handler(
 ctx,
 args,
 ): Promise<{ ok: true; saved: number; droppedCoordinates: string[] }> {
+return await withServerRunBracket(ctx, {
+kind: "ai_call",
+phase: "drafting",
+label: "施設辞書への保存",
+endDetail: (r) => r.saved + "件を保存" + (r.droppedCoordinates.length > 0 ? "（座標を落とした施設: " + r.droppedCoordinates.join("、") + "）" : ""),
+}, async () => {
+
 let saved = 0;
 const droppedCoordinates: string[] = [];
 // Photo downloads are deduped per facility within this call and
@@ -14072,6 +19090,7 @@ saved++;
 }
 ctx.invalidateQueries();
 return { ok: true, saved, droppedCoordinates };
+});
 },
 }),
 
@@ -14126,6 +19145,13 @@ fetchedAt: z.string().max(40).nullable().optional(),
 }),
 response: z.object({ ok: z.literal(true), saved: z.number()}),
 async handler(ctx, args): Promise<{ ok: true; saved: number}> {
+return await withServerRunBracket(ctx, {
+kind: "ai_call",
+phase: "drafting",
+label: "エリア間移動時間の登録",
+endDetail: (r) => r.saved + "件を登録",
+}, async () => {
+
 const db = ctx.db<typeof schema>();
 let saved = 0;
 for (const e of args.entries) {
@@ -14173,6 +19199,7 @@ saved++;
 }
 ctx.invalidateQueries();
 return { ok: true, saved};
+});
 },
 }),
 
@@ -14354,7 +19381,7 @@ planTouched = true;
 continue;
 }
 const fb = fallback.get(facilityNameKey(it.name));
-if (fb?.via === "area") {
+if (fb?.via === "area" || fb?.via === "venue") {
 await db
 .update(schema.planItems)
 .set({ lat: fb.lat, lng: fb.lng})
@@ -14602,94 +19629,20 @@ return { ok: false, error: "プランの作成が終わってからお試しく�
 }
 // A live fetch is left alone, but a fetch stuck past the stale window
 // (its task died without reporting) falls through and is restarted.
+// A fetch the task manager is running is governed by the manager's
+// own deadlines, not by this stale window: while its run is open,
+// the fetch is left alone however long it has been running.
 if (set.imagesStatus === "fetching" && !isStaleImageFetch(set)) {
 return { ok: true, error: null};
 }
+if (
+set.imagesStatus === "fetching" &&
+(await mgrHasOpenRun(ctx, { type: "item_images", planSetId: set.id }))
+) {
+return { ok: true, error: null};
+}
 
-const planRows = await db
-.select({ id: schema.plans.id})
-.from(schema.plans)
-.where(eq(schema.plans.planSetId, set.id));
-const missing: { id: number; name: string; kind: string}[] = [];
-const seenNames = new Set<string>();
-for (const plan of planRows) {
-const itemRows = await db
-.select()
-.from(schema.planItems)
-.where(eq(schema.planItems.planId, plan.id))
-.orderBy(asc(schema.planItems.sortOrder));
-for (const it of itemRows) {
-// An item needs the fetch task when it still lacks a photo OR its
-// official detail-page link (the same task confirms both).
-if (it.imageBlobKey && it.officialUrl) continue;
-if (
-it.kind!== "attraction" &&
-it.kind!== "show" &&
-it.kind!== "parade" &&
-it.kind!== "restaurant"
-) {
-continue;
-}
-// Facility dictionary first: a fresh dictionary photo and/or the
-// recorded official URL are applied directly, with no fetch task
-// at all. Only what the dictionary cannot cover goes to the task.
-const dict = await findFacility(ctx, set.park, it.name);
-if (dict) {
-if (
-!it.imageBlobKey &&
-dict.imageBlobKey &&
-dict.imageSource &&
-facilityFreshness(dict, Date.now()).imageFresh
-) {
-await db
-.update(schema.planItems)
-.set({
-imageBlobKey: dict.imageBlobKey,
-imageSource: dict.imageSource,
-})
-.where(eq(schema.planItems.id, it.id));
-it.imageBlobKey = dict.imageBlobKey;
-}
-if (!it.officialUrl && dict.officialUrl) {
-await db
-.update(schema.planItems)
-.set({ officialUrl: dict.officialUrl})
-.where(eq(schema.planItems.id, it.id));
-it.officialUrl = dict.officialUrl;
-}
-if (it.imageBlobKey && it.officialUrl) continue;
-}
-// Same carry-over as at save time: another finished plan set of
-// this park may already own this facility's photo (the typical
-// case is a rebuild whose original set has the photos while the
-// dictionary does not). Apply it directly, with no fetch task.
-if (!it.imageBlobKey) {
-const owned = await findOwnedFacilityPhoto(
-ctx,
-set.park,
-it.name,
-set.id,
-);
-if (owned) {
-await db
-.update(schema.planItems)
-.set({ imageBlobKey: owned.key, imageSource: owned.source})
-.where(eq(schema.planItems.id, it.id));
-it.imageBlobKey = owned.key;
-await upsertFacilityFromFetch(ctx, set.park, {
-name: it.name,
-image: { blobKey: owned.key, source: owned.source},
-});
-}
-}
-if (it.imageBlobKey && it.officialUrl) continue;
-// The same facility can appear in several plans; fetch it once and
-// share the blob with every row of that name in this set.
-if (seenNames.has(it.name)) continue;
-seenNames.add(it.name);
-missing.push({ id: it.id, name: it.name, kind: it.kind});
-}
-}
+const missing = await collectMissingItemImages(ctx, set);
 if (missing.length === 0) {
 await db
 .update(schema.planSets)
@@ -14699,28 +19652,12 @@ ctx.invalidateQueries();
 return { ok: true, error: null};
 }
 
-await db
-.update(schema.planSets)
-.set({ imagesStatus: "fetching", imagesFetchStartedAt: new Date()})
-.where(eq(schema.planSets.id, set.id));
-const spawned = await ctx.agent.spawnTask(
-buildImageAssignment(set.park, set.id, missing),
-{
-expectsAction: "saveItemImages",
-// A restarted fetch must not be deduped against the dead earlier
-// task, so the key carries this attempt's start time.
-dedupeKey: `plan-images-${set.id}-${Date.now()}`,
-},
-);
-if (!spawned.ok) {
-await db
-.update(schema.planSets)
-.set({ imagesStatus: "failed", imagesFetchStartedAt: null})
-.where(eq(schema.planSets.id, set.id));
+const started = await spawnItemImagesAttempt(ctx, set, missing);
+if (!started) {
 ctx.invalidateQueries();
 return {
 ok: false,
-error: `画像の取得を開始できませんでした: ${spawned.error}`,
+error: "画像の取得を開始できませんでした。しばらく後に再度お試しください。",
 };
 }
 ctx.invalidateQueries();
@@ -14834,6 +19771,14 @@ await db
 .update(schema.planSets)
 .set({ imagesStatus: "done", imagesFetchStartedAt: null})
 .where(eq(schema.planSets.id, set.id));
+// 裏タスク管理： the photos/links are saved and the fetch is
+// marked done — the fetch's normal completion, and the manager
+// run's "finished" mark.
+await mgrFinishRunForTarget(
+ctx,
+{ type: "item_images", planSetId: set.id },
+"finished",
+);
 ctx.invalidateQueries();
 return { ok: true};
 },
@@ -14850,6 +19795,15 @@ await db
 .update(schema.planSets)
 .set({ imagesStatus: "failed", imagesFetchStartedAt: null})
 .where(eq(schema.planSets.id, args.planSetId));
+// 裏タスク管理： a reported failure is still the task's normal
+// completion (the fetch is marked failed by its own report) —
+// the manager run's "finished" mark; the manager does not
+// retry a reported end.
+await mgrFinishRunForTarget(
+ctx,
+{ type: "item_images", planSetId: args.planSetId },
+"finished",
+);
 ctx.invalidateQueries();
 return { ok: true};
 },
@@ -14930,6 +19884,8 @@ failedSet.setType === "same_day"
 }\n現在の公式情報を確認できなかったため、${SPEC_REPAIR_GUIDANCE}`,
 });
 }
+// 過程記録： close the run with the reported reason.
+await closeOpenRunLog(ctx, args.planSetId, "failed", args.error, null, "finished");
 ctx.invalidateQueries();
 return { ok: true};
 },
@@ -14985,6 +19941,16 @@ text: `${rejection}\n元のプラン${slot}はそのまま残っています。`
 });
 }
 }
+// 過程記録： close this slot's run — the impossibility gate is
+// the reported reason.
+await closeOpenRunLog(
+ctx,
+args.planSetId,
+"failed",
+"無理ゲート（§12.9）により作成不可と判定された",
+slot,
+"finished",
+);
 ctx.invalidateQueries();
 return { ok: true};
 }
@@ -15032,6 +19998,9 @@ role: "assistant",
 text: rejection,
 });
 }
+// 過程記録： close the run — the impossibility gate is the
+// reported reason.
+await closeOpenRunLog(ctx, args.planSetId, "failed", errorText, null, "finished");
 ctx.invalidateQueries();
 return { ok: true};
 },
@@ -15288,6 +20257,13 @@ if (updated.length > 0) {
 await db
 .insert(schema.messages)
 .values({ role: "assistant", text: args.answer});
+// 裏タスク管理： the answer is posted — the research's normal
+// completion, and the manager run's "finished" mark.
+await mgrFinishRunForTarget(
+ctx,
+{ type: "research", researchId: args.researchId },
+"finished",
+);
 }
 ctx.invalidateQueries();
 return { ok: true};
@@ -15320,6 +20296,14 @@ role: "assistant",
 // in the main chat) in case the official site itself changed.
 text: `公式サイトで確認できませんでした。時間をおいて、もう一度「調べて」と送ってください。（理由: ${args.error}）\nなお、公式サイトの変更などで確認できない場合は、${SPEC_REPAIR_GUIDANCE}`,
 });
+// 裏タスク管理： a reported failure is still the task's normal
+// completion (its word is on the chat) — the manager run's
+// "finished" mark; the manager does not retry a reported end.
+await mgrFinishRunForTarget(
+ctx,
+{ type: "research", researchId: args.researchId },
+"finished",
+);
 }
 ctx.invalidateQueries();
 return { ok: true};
@@ -15392,6 +20376,13 @@ s.fetchMethod?? prevByUrl.get(s.url)?.fetchMethod?? null,
 await db
 .insert(schema.messages)
 .values({ role: "assistant", text: args.summary});
+// 裏タスク管理： the updated list is saved — the update's
+// normal completion, and the manager run's "finished" mark.
+await mgrFinishRunForTarget(
+ctx,
+{ type: "wait_sources", requestId: args.requestId },
+"finished",
+);
 ctx.invalidateQueries();
 return { ok: true};
 },
@@ -15419,6 +20410,14 @@ await db.insert(schema.messages).values({
 role: "assistant",
 text: `待ち時間参考サイトの更新ができませんでした。時間をおいて、もう一度指示してください。（理由: ${args.error}）`,
 });
+// 裏タスク管理： a reported failure is still the task's normal
+// completion (its word is on the chat) — the manager run's
+// "finished" mark; the manager does not retry a reported end.
+await mgrFinishRunForTarget(
+ctx,
+{ type: "wait_sources", requestId: args.requestId },
+"finished",
+);
 }
 ctx.invalidateQueries();
 return { ok: true};
@@ -15451,124 +20450,32 @@ return { ok: false, error: "対象のプランが見つかりませんでした�
 // serialized start section as every other start entrance （記録V).
 const startSection = await acquireStartSection();
 try {
-if (set.status === "generating") {
-// Whole-set retry: discard whatever the dead run managed to
-// save, reset the run's result fields and progress, restart
-// the elapsed clock at the retry moment, and spawn the same
-// assignment again from the set's recorded start inputs. The
-// conditions snapshot is NOT rewritten. A same-day set whose
-// snapshotted start inputs are missing cannot be re-run
-// as-is — refuse BEFORE discarding anything.
-let sameDayStart: { location: string; startTime: string} | null = null;
-if (set.setType === "same_day") {
-if (!set.sameDayLocation || !set.sameDayStartTime) {
-return {
-ok: false,
-error: "当日検索の開始時の記録が無いため、リトライできませんでした。キャンセルして、プラン作成タブの「当日検索」から改めてお試しください。",
-};
-}
-sameDayStart = {
-location: set.sameDayLocation,
-startTime: set.sameDayStartTime,
-};
-}
-const planRows = await db
-.select({ id: schema.plans.id})
-.from(schema.plans)
-.where(eq(schema.plans.planSetId, set.id));
-if (planRows.length > 0) {
-const ids = planRows.map((p) => p.id);
-await db
-.delete(schema.planItems)
-.where(inArray(schema.planItems.planId, ids));
-await db.delete(schema.plans).where(inArray(schema.plans.id, ids));
-}
-const now = new Date();
-await db
-.update(schema.planSets)
-.set({
-error: null,
-progressA: "waiting",
-progressB: "waiting",
-progressC: "waiting",
-progressUpdatedAt: now,
-generationStartedAt: now,
-completedAt: null,
-notes: null,
-parkHours: null,
-sourcesJson: null,
-estimateSourcesJson: null,
-verificationJson: null,
-generationMetricsJson: null,
-crowdLevel: null,
-crowdBasis: null,
-factBuildId: null,
-dpaSnapshotText: null,
-lastVerifiedAt: null,
-reverificationsJson: null,
-imagesStatus: "idle",
-imagesFetchStartedAt: null,
-})
-.where(eq(schema.planSets.id, set.id));
-let spawnedOk: boolean;
-if (set.setType === "same_day") {
-const snapshotConditions = parseSnapshotConditions(set).conditions;
-const agesM = /人数[:：][^\n]*（([^）]+)）/.exec(
-set.conditionsSnapshot ?? "",
-);
-const sd: SameDayInput = {
-park: set.park,
-location: sameDayStart?.location ?? "",
-startTime: sameDayStart?.startTime ?? "",
-adults: set.sameDayAdults ?? 2,
-children: set.sameDayChildren ?? 0,
-childrenAges: agesM ? (agesM[1] ?? null) : null,
-budgetJpy: snapshotConditions.budgetJpy,
-walkingSpeed: set.walkingSpeed ?? "slightly_slow",
-request: set.sameDayRequest,
-};
-spawnedOk = await spawnSameDayRun(ctx, set.id, sd, set.title, true);
-} else {
-const conditions = parseSnapshotConditions(set).conditions;
-let prevSet: { id: number; title: string} | null = null;
-if (set.rebuiltFromSetId != null) {
-const origRows = await db
-.select()
-.from(schema.planSets)
-.where(eq(schema.planSets.id, set.rebuiltFromSetId))
-.limit(1);
-const orig = origRows[0];
-if (orig && orig.status === "done") {
-prevSet = { id: orig.id, title: orig.title};
-}
-}
-spawnedOk = await spawnGenerationRun(ctx, set.id, conditions, {
-prevSet,
-dayOf: null,
-changeRequest: null,
-title: set.title,
-retrySpawn: true,
-});
-}
-ctx.invalidateQueries();
-return spawnedOk
-? { ok: true, error: null}
-: {
-ok: false,
-error: "再実行を開始できませんでした。状態はチャットにもお知らせしました。",
-};
+if (set.status === "generating" || set.status === "failed") {
+// Whole-set retry: re-run on the SAME set from its recorded
+// start inputs (retryWholeSetGeneration). A failed set is
+// retryable the same way — that is the state the task
+// manager leaves a set in when its attempts ran out
+// （裏タスク管理クラス）: failed on its tab, never stuck at
+// 作成中， and re-runnable from here.
+return await retryWholeSetGeneration(ctx, set);
 }
 if (set.status === "done") {
 // Partial-operation retry: re-run the ONE unfinished slot
 // from the request recorded at its start. The other plans
-// and the slot's original plan are never touched.
+// and the slot's original plan are never touched. A slot the
+// task manager marked failed (attempts exhausted, its
+// request still recorded) is retryable the same way.
+const pendingOps = parsePendingOps(set.pendingOpsJson);
 const generatingSlots = (["A", "B", "C"] as const).filter(
-(s) =>
-(s === "A"
+(s) => {
+const prog =
+s === "A"
 ? set.progressA
 : s === "B"
 ? set.progressB
-: set.progressC) === "generating",
+: set.progressC;
+return prog === "generating" || (prog === "failed" && pendingOps[s] != null);
+},
 );
 if (generatingSlots.length === 0) {
 return { ok: false, error: "作成中の操作がありません。"};
@@ -15648,6 +20555,9 @@ if (!set) {
 return { ok: false, error: "対象のプランが見つかりませんでした。"};
 }
 if (set.status === "generating") {
+// 過程記録： close the run as cancelled BEFORE the set rows go
+// (the record itself is kept, tied to the now-deleted set id).
+await closeOpenRunLog(ctx, set.id, "cancelled", "利用者がキャンセルした", null, "cancelled");
 await deletePlanSetRows(ctx, set.id);
 await db.insert(schema.messages).values({
 role: "assistant",
@@ -15662,18 +20572,24 @@ ctx.invalidateQueries();
 return { ok: true, error: null};
 }
 if (set.status === "done") {
+// Slots in flight — or standing at 失敗 with their request
+// still recorded (the task manager's attempts-exhausted end):
+// cancelling stands either back down to the intact original.
+const ops = parsePendingOps(set.pendingOpsJson);
 const generatingSlots = (["A", "B", "C"] as const).filter(
-(s) =>
-(s === "A"
+(s) => {
+const prog =
+s === "A"
 ? set.progressA
 : s === "B"
 ? set.progressB
-: set.progressC) === "generating",
+: set.progressC;
+return prog === "generating" || (prog === "failed" && ops[s] != null);
+},
 );
 if (generatingSlots.length === 0) {
 return { ok: false, error: "作成中の操作がありません。"};
 }
-const ops = parsePendingOps(set.pendingOpsJson);
 let nextOpsJson = set.pendingOpsJson;
 for (const s of generatingSlots) {
 nextOpsJson = pendingOpsJsonWith(nextOpsJson, s, null);
@@ -15697,6 +20613,10 @@ pendingOpsJson: nextOpsJson,
 })
 .where(eq(schema.planSets.id, set.id));
 const only = generatingSlots.length === 1 ? generatingSlots[0] : undefined;
+// 過程記録： close each cancelled slot's run.
+for (const s of generatingSlots) {
+await closeOpenRunLog(ctx, set.id, "cancelled", "利用者がキャンセルした", s, "cancelled");
+}
 await db.insert(schema.messages).values({
 role: "assistant",
 text:
@@ -15736,6 +20656,8 @@ const db = ctx.db<typeof schema>();
 // plan sets; normalized facts -> fact builds -> source
 // snapshots). Every delete is unconditional — this is the one
 // action whose whole purpose is a complete wipe.
+await db.delete(schema.runLogEvents);
+await db.delete(schema.runLogs);
 await db.delete(schema.planItems);
 await db.delete(schema.verificationRequests);
 await db.delete(schema.plans);
@@ -15765,6 +20687,7 @@ updatedAt: seedStamp,
 await db.delete(schema.areaTravelTimes);
 await db.delete(schema.researchRequests);
 await db.delete(schema.waitTimeSourceRequests);
+await db.delete(schema.mgrDialogNotices);
 await db.delete(schema.messages);
 await db.delete(schema.conditions);
 ctx.invalidateQueries();
@@ -16054,6 +20977,13 @@ await db.insert(schema.messages).values({
 role: "assistant",
 text: lines.join("\n"),
 });
+// 裏タスク管理： the result is posted — the verification's
+// normal completion, and the manager run's "finished" mark.
+await mgrFinishRunForTarget(
+ctx,
+{ type: "verification", requestId: args.requestId },
+"finished",
+);
 ctx.invalidateQueries();
 return { ok: true };
 },
@@ -16097,9 +21027,152 @@ role: "assistant",
 // premises — the failure line carries the repair guidance too.
 text: `「${targetRows[0]?.title ?? "プラン"}」の一括検証ができませんでした。時間をおいて、チャットで「検証して」と送って、もう一度お試しください。（理由: ${args.error}）\n現在の公式情報を確認できなかったため、${SPEC_REPAIR_GUIDANCE}`,
 });
+// 裏タスク管理： a reported failure is still the task's normal
+// completion (its word is on the chat) — the manager run's
+// "finished" mark; the manager does not retry a reported end.
+await mgrFinishRunForTarget(
+ctx,
+{ type: "verification", requestId: args.requestId },
+"finished",
+);
 }
 ctx.invalidateQueries();
 return { ok: true };
+},
+}),
+
+recordTaskAttempt: defineAction({
+description:
+"Internal: one attempt's own dedicated record action for the task manager （裏タスク管理・検証6). Called by the attempt's background task in the kind's phase sequence (see the assignment). The server stamps the receipt instant; the FIRST call is the evidence the task started. When the call completes the kind's phase sequence, the attempt and its run close as succeeded and the test advances. A call for an already-closed attempt is refused — late calls are never accepted.",
+request: z.object({
+attemptId: z.number(),
+phase: z.string().min(1).max(40),
+note: z.string().max(2000).optional(),
+text: z.string().max(200000).optional(),
+}),
+response: z.object({ ok: z.literal(true) }),
+async handler(ctx, args): Promise<{ ok: true }> {
+const db = ctx.db<typeof schema>();
+const attemptRows = await db
+.select()
+.from(schema.taskMgrAttempts)
+.where(eq(schema.taskMgrAttempts.id, args.attemptId))
+.limit(1);
+const attempt = attemptRows[0];
+if (!attempt) {
+throw new Error(
+`recordTaskAttempt: 試行（id=${args.attemptId}）が見つかりません。`,
+);
+}
+if (attempt.status === "succeeded" || attempt.status === "cancelled") {
+throw new Error(
+`recordTaskAttempt: 試行（id=${args.attemptId}）は既に閉じています（status=${attempt.status}）。遅れてきた呼び出しは受け付けません。`,
+);
+}
+const runRows = await db
+.select()
+.from(schema.taskMgrRuns)
+.where(eq(schema.taskMgrRuns.id, attempt.runId))
+.limit(1);
+const run = runRows[0];
+if (!run) {
+throw new Error(
+`recordTaskAttempt: 実行（id=${attempt.runId}）が見つかりません。`,
+);
+}
+const receivedAt = new Date();
+const isFirst = attempt.firstCallAt == null;
+const text = args.text ?? null;
+await db.insert(schema.taskMgrCalls).values({
+attemptId: attempt.id,
+phase: args.phase,
+calledAt: receivedAt,
+note: args.note ?? null,
+textLength: text != null ? text.length : null,
+savedText: text != null ? text.slice(0, 20000) : null,
+});
+// Production run: a record call only ever marks the start
+// (the first call is the evidence the task started). The
+// attempt's completion is the processing's own normal
+// completion, observed server-side — never a phase sequence.
+if (run.targetJson != null) {
+if (isFirst) {
+await db
+.update(schema.taskMgrAttempts)
+.set({ status: "running", firstCallAt: receivedAt })
+.where(eq(schema.taskMgrAttempts.id, attempt.id));
+}
+ctx.invalidateQueries();
+return { ok: true };
+}
+// Progress = how many of the kind's expected phases the calls
+// so far match, in order. This call advances it only when its
+// phase is the expected next one.
+const def = taskMgrKindDef(run.kind);
+const callRows = await db
+.select()
+.from(schema.taskMgrCalls)
+.where(eq(schema.taskMgrCalls.attemptId, attempt.id))
+.orderBy(asc(schema.taskMgrCalls.id));
+let progress = 0;
+for (const c of callRows) {
+if (def.phases[progress] === c.phase) progress += 1;
+}
+const complete = progress >= def.phases.length;
+if (complete) {
+await db
+.update(schema.taskMgrAttempts)
+.set({
+status: "succeeded",
+firstCallAt: isFirst ? receivedAt : attempt.firstCallAt,
+finishedAt: receivedAt,
+})
+.where(eq(schema.taskMgrAttempts.id, attempt.id));
+await db
+.update(schema.taskMgrRuns)
+.set({ status: "succeeded", closedAt: receivedAt })
+.where(eq(schema.taskMgrRuns.id, run.id));
+if (run.testId != null) await advanceTaskMgrTest(ctx, run.testId);
+} else if (isFirst) {
+await db
+.update(schema.taskMgrAttempts)
+.set({ status: "running", firstCallAt: receivedAt })
+.where(eq(schema.taskMgrAttempts.id, attempt.id));
+}
+ctx.invalidateQueries();
+return { ok: true };
+},
+}),
+
+checkTaskManager: defineAction({
+description:
+"Task manager （裏タスク管理）: the periodic server-side deadline check. Judges every open attempt — the manager test's and the production processings' (plan creation, same-day search, research, bulk verification, wait-time site list update, image fetch, restaurant fact correction) — from its recorded instants alone: no first record call within the kind's start timeout, or no finish within its total timeout, closes the attempt as cancelled and retries on the same target; attempts exhausted closes the run as forced （試行回数を超えたので強制終了） and surfaces the failure (plan tab for plan creation / same-day search, chat for research / verification, dialog for the site list update / image fetch / restaurant correction). Runs on a 1-minute schedule; also callable on demand.",
+request: z.object({}),
+response: z.object({
+ok: z.literal(true),
+checkedAt: z.string(),
+closedAttempts: z.number(),
+retriedAttempts: z.number(),
+forcedRuns: z.number(),
+}),
+async handler(
+ctx,
+): Promise<{
+ok: true;
+checkedAt: string;
+closedAttempts: number;
+retriedAttempts: number;
+forcedRuns: number;
+}> {
+const result = await runTaskMgrCheck(ctx);
+ctx.invalidateQueries();
+return {
+ok: true,
+checkedAt: new Date().toISOString(),
+closedAttempts: result.closedAttempts,
+retriedAttempts: result.retriedAttempts,
+forcedRuns: result.forcedRuns,
+};
 },
 }),
 } satisfies ActionsModule;

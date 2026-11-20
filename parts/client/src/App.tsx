@@ -22,17 +22,24 @@ type CSSProperties,
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type ApiResponse } from "./api";
+import { actionFields } from "@hatch/space-sdk/fields" with { type: "macro" };
+import type { Actions } from "../../server/src/actions";
 import { buildPlanPdf } from "./pdf";
 import {
-  TIGHT_LEG_CAUTION_TEXT,
-  crowdFactorLabel,
-  crowdScenarioPremiseText,
-  formatWalkDistance,
-  tightLegTargets,
+TIGHT_LEG_CAUTION_TEXT,
+crowdFactorLabel,
+crowdScenarioPremiseText,
+formatWalkDistance,
+tightLegTargets,
 } from "./plan_metrics";
 import "./hatch-maps.js";
 import "./hatch-maps.css";
 import { buildStaticMapUrl, mountPlaceListMap } from "./map_helpers.mjs";
+
+// Input limits (maxLength / min / max / required …) are read from
+// the server actions' request schemas at build time, so a form
+// input and the action it feeds can never disagree about a limit.
+const FIELDS = actionFields<typeof Actions>();
 
 type State = ApiResponse<typeof api, "getState">;
 type Conditions = State["conditions"];
@@ -1624,6 +1631,96 @@ function GenerationEscapeBlock({
   );
 }
 
+// A failed plan set's リトライ button: the set stands at 失敗
+// (never stuck at 作成中 — that is the state the task manager
+// leaves when a generation's attempts ran out) and
+// retryGeneration re-runs the whole generation on the SAME set
+// from its recorded start inputs. Shown on the failed set's own
+// tab, the failure surface for plan creation / same-day search.
+function FailedSetRetryBlock({ planSetId }: { planSetId: number }) {
+  const queryClient = useQueryClient();
+  const retryMutation = useMutation({
+    mutationFn: async () => await api.retryGeneration({ planSetId }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["state"] }),
+  });
+  const error =
+    retryMutation.data && !retryMutation.data.ok
+      ? retryMutation.data.error
+      : retryMutation.isError
+        ? "操作できませんでした。少し待ってもう一度お試しください。"
+        : null;
+  return (
+    <div className="mt-4 space-y-2.5">
+      <button
+        type="button"
+        onClick={() => retryMutation.mutate()}
+        disabled={retryMutation.isPending}
+        className="rounded-full bg-[var(--accent)] px-5 py-1.5 text-sm font-bold text-[var(--accent-text)] disabled:opacity-50"
+      >
+        リトライ
+      </button>
+      {error ? (
+        <p role="alert" className="text-sm font-semibold text-red-700 dark:text-red-300">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+// A partial operation （部分差し替え / 当日リスケ） the task
+// manager ended after exhausting its attempts: the slot stands
+// at 失敗 with its request still recorded and the original plan
+// untouched. リトライ re-runs the recorded request on the same
+// slot; キャンセル stands the slot back down to the original.
+function PartialOpFailedBlock({ planSetId }: { planSetId: number }) {
+  const queryClient = useQueryClient();
+  const retryMutation = useMutation({
+    mutationFn: async () => await api.retryGeneration({ planSetId }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["state"] }),
+  });
+  const cancelMutation = useMutation({
+    mutationFn: async () => await api.cancelGeneration({ planSetId }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["state"] }),
+  });
+  const busy = retryMutation.isPending || cancelMutation.isPending;
+  const error =
+    retryMutation.data && !retryMutation.data.ok
+      ? retryMutation.data.error
+      : cancelMutation.data && !cancelMutation.data.ok
+        ? cancelMutation.data.error
+        : retryMutation.isError || cancelMutation.isError
+          ? "操作できませんでした。少し待ってもう一度お試しください。"
+          : null;
+  return (
+    <div className="mt-2.5 space-y-2.5">
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => retryMutation.mutate()}
+          disabled={busy}
+          className="rounded-full bg-[var(--accent)] px-5 py-1.5 text-sm font-bold text-[var(--accent-text)] disabled:opacity-50"
+        >
+          リトライ
+        </button>
+        <button
+          type="button"
+          onClick={() => cancelMutation.mutate()}
+          disabled={busy}
+          className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-5 py-1.5 text-sm font-bold text-red-700 disabled:opacity-50 dark:text-red-300"
+        >
+          キャンセル
+        </button>
+      </div>
+      {error ? (
+        <p role="alert" className="text-sm font-semibold text-red-700 dark:text-red-300">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 // ------------------------------------------------------- set conditions
 
 // Short crowd-scenario words for the A/B/C switcher pills, in the
@@ -2146,6 +2243,7 @@ function PlanSetView({
             ? "現在地点や指定時刻を変えて、プラン作成タブの「当日検索」からもう一度お試しください。"
             : "条件を変えて、プラン作成タブの「この条件で3プランを作成」からもう一度お試しください。"}
         </p>
+        <FailedSetRetryBlock planSetId={planSet.id} />
       </div>
     );
   }
@@ -2372,6 +2470,24 @@ function PlanSetView({
           className="mx-4 mt-3 shrink-0 rounded-[var(--radius)] bg-red-100 px-3.5 py-2.5 text-sm text-red-900 dark:bg-red-950 dark:text-red-100"
         >
           作成は完了しませんでした{planSet.error ? `（${planSet.error}）` : ""}。保存できたプランだけを表示しています。
+          <FailedSetRetryBlock planSetId={planSet.id} />
+        </div>
+      ) : null}
+      {planSet.status === "done" &&
+      (["A", "B", "C"] as const).some((s) => planSet.partialOpFailures[s]) ? (
+        <div
+          role="alert"
+          className="mx-4 mt-3 shrink-0 rounded-[var(--radius)] bg-red-100 px-3.5 py-2.5 text-sm text-red-900 dark:bg-red-950 dark:text-red-100"
+        >
+          {(["A", "B", "C"] as const)
+            .filter((s) => planSet.partialOpFailures[s])
+            .map((s) => (
+              <p key={s}>
+                プラン{s}の差し替えはできませんでした。{planSet.partialOpFailures[s]}
+                元のプラン{s}はそのまま残っています。
+              </p>
+            ))}
+          <PartialOpFailedBlock planSetId={planSet.id} />
         </div>
       ) : null}
       {planSet.status === "done" &&
@@ -3096,6 +3212,7 @@ function PlanSetView({
               今の状況を教えてください（任意）
             </label>
             <textarea
+              {...FIELDS.requestLotteryReschedule.userNote}
               id={`lottery-note-${planSet.id}`}
               value={lotteryNote}
               onChange={(e) => setLotteryNote(e.target.value)}
@@ -3173,6 +3290,7 @@ function PlanSetView({
               今の状況を教えてください（任意）
             </label>
             <textarea
+              {...FIELDS.requestDpaReschedule.userNote}
               id={`cantbuy-note-${planSet.id}`}
               value={cantBuyNote}
               onChange={(e) => setCantBuyNote(e.target.value)}
@@ -4552,6 +4670,7 @@ function SameDaySearchSection({
             現在地点
           </label>
           <input
+            {...FIELDS.requestSameDaySearch.currentLocation}
             id="sd-location"
             type="text"
             placeholder="例：アメリカンウォーターフロント／ソアリンの前"
@@ -4585,6 +4704,7 @@ function SameDaySearchSection({
             大人（人）
           </label>
           <input
+            {...FIELDS.requestSameDaySearch.adults}
             id="sd-adults"
             type="text"
             inputMode="numeric"
@@ -4598,6 +4718,7 @@ function SameDaySearchSection({
             子ども（人）
           </label>
           <input
+            {...FIELDS.requestSameDaySearch.children}
             id="sd-children"
             type="text"
             inputMode="numeric"
@@ -4611,6 +4732,7 @@ function SameDaySearchSection({
             子どもの年齢・身長
           </label>
           <input
+            {...FIELDS.requestSameDaySearch.childrenAges}
             id="sd-children-ages"
             type="text"
             placeholder="例：6歳、102cm"
@@ -4624,6 +4746,7 @@ function SameDaySearchSection({
             予算の上限（円）
           </label>
           <input
+            {...FIELDS.requestSameDaySearch.budgetJpy}
             id="sd-budget"
             type="text"
             inputMode="numeric"
@@ -4674,6 +4797,7 @@ function SameDaySearchSection({
           ご要望
         </label>
         <textarea
+          {...FIELDS.requestSameDaySearch.request}
           id="sd-request"
           rows={3}
           placeholder="例：絶叫系は苦手。夕食は和食がいい。あと1つはDPAを使いたい"
@@ -5419,12 +5543,13 @@ function CustomizeHelpView() {
   );
 }
 
-// ---------------------------------------------------------------- app shell
-
 export function App() {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<TabKey>("chat");
   const [draft, setDraft] = useState("");
+  // Why an attempted send did not go out (an empty message), shown
+  // above the composer instead of silently doing nothing.
+  const [composerError, setComposerError] = useState<string | null>(null);
   // The text of the in-flight send, shown in the chat immediately so the
   // automatic switch to the chat tab is self-explanatory.
   const [pendingText, setPendingText] = useState<string | null>(null);
@@ -5556,6 +5681,30 @@ export function App() {
       .catch(() => undefined);
   }, [eveTarget]);
 
+  // Task-manager congestion dialog: getState offers an unshown
+  // notice when one of the auxiliary production processings
+  // (wait-time site list update / image fetch / restaurant fact
+  // correction) exhausted its attempts under the task manager.
+  // Like the day-before dialog, the offered notice is captured
+  // into local state the moment it appears — and marked shown on
+  // the server at the same moment — so it displays exactly once
+  // and a later refetch can never make it vanish mid-read.
+  const [mgrNotice, setMgrNotice] = useState<{
+    id: number;
+    text: string;
+  } | null>(null);
+  const mgrNoticeMarkedRef = useRef<number | null>(null);
+  const mgrNoticeTarget = stateQuery.data?.mgrDialogNotice ?? null;
+  useEffect(() => {
+    if (!mgrNoticeTarget || mgrNoticeMarkedRef.current === mgrNoticeTarget.id)
+      return;
+    mgrNoticeMarkedRef.current = mgrNoticeTarget.id;
+    setMgrNotice(mgrNoticeTarget);
+    void api
+      .markMgrDialogShown({ noticeId: mgrNoticeTarget.id })
+      .catch(() => undefined);
+  }, [mgrNoticeTarget]);
+
   const state = stateQuery.data;
   const activePlanSet =
     typeof activeTab === "number"
@@ -5581,7 +5730,12 @@ export function App() {
 
   const submitDraft = () => {
     const text = draft.trim();
-    if (!text || sendMutation.isPending) return;
+    if (!text) {
+      setComposerError("メッセージを入力してください。");
+      return;
+    }
+    if (sendMutation.isPending) return;
+    setComposerError(null);
     // Capture the tab open at send time BEFORE the view switches to
     // the chat tab: the AI resolves plan references against the plan
     // set open in that tab (and the A/B/C slot selected in it).
@@ -5594,7 +5748,7 @@ export function App() {
             ? { kind: "waitsources" }
             : effectiveTab === "help"
               ? { kind: "help" }
-              : {
+                : {
                 kind: "planSet",
                 planSetId: effectiveTab,
                 slot: planSlotBySet[effectiveTab] ?? "A",
@@ -5622,15 +5776,15 @@ export function App() {
 
   return (
     <div className="flex h-dvh flex-col bg-[var(--bg)] text-[var(--text)]">
-      {/* Tab bar: TAB1/TAB2 fixed, plan tabs appended. Pinned to the top of
-          the screen (sticky) so it never scrolls away. */}
+      {/* Tab bar: fixed tabs first, plan tabs appended. Pinned to
+          the top of the screen (sticky) so it never scrolls away. */}
       <div
         ref={tabBarRef}
         role="tablist"
         aria-label="タブ"
         className="pt-safe sticky top-0 z-30 flex w-full min-w-0 shrink-0 cursor-grab gap-1.5 overflow-x-auto border-b border-[var(--border)] bg-[var(--surface)] px-3 py-2"
       >
-        <TabButton
+                        <TabButton
           label="AIチャット"
           active={effectiveTab === "chat"}
           onClick={() => setActiveTab("chat")}
@@ -5825,6 +5979,14 @@ export function App() {
 
       {/* Fixed AI instruction form (TAB1 conversation), always at the bottom. */}
       <div className="sticky bottom-0 border-t border-[var(--border)] bg-[var(--surface)] pb-safe">
+        {composerError ? (
+          <p
+            role="alert"
+            className="mx-auto w-full max-w-3xl px-3 pt-2 text-sm font-semibold text-red-700 dark:text-red-300"
+          >
+            {composerError}
+          </p>
+        ) : null}
         <form
           className="mx-auto flex w-full max-w-3xl items-end gap-2 px-3 py-2.5"
           onSubmit={(e: FormEvent) => {
@@ -5836,6 +5998,7 @@ export function App() {
             AIへの指示
           </label>
           <textarea
+            {...FIELDS.sendMessage.text}
             id="ai-composer"
             ref={textareaRef}
             rows={1}
@@ -5844,6 +6007,7 @@ export function App() {
             className="max-h-[120px] flex-1 resize-none rounded-2xl border border-[var(--border)] bg-[var(--bg)] px-3.5 py-2.5 text-base"
             onChange={(e) => {
               setDraft(e.target.value);
+              setComposerError(null);
               autoGrow();
             }}
             onKeyDown={onComposerKeyDown}
@@ -5948,6 +6112,34 @@ export function App() {
             <div className="mt-4 flex">
               <button
                 onClick={() => setAnnouncement(null)}
+                className="flex-1 rounded-full bg-[var(--accent)] px-4 py-2.5 font-semibold text-white"
+              >
+                閉じる
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Task-manager congestion dialog: shown when an auxiliary
+          production processing (wait-time site list update /
+          image fetch / restaurant fact correction) exhausted its
+          attempts. The body is the one common congestion text,
+          verbatim from the server. It yields to the day-before
+          dialog and the announcement dialog so dialogs never
+          stack; it appears once they are gone. */}
+      {!eveDialog && !eveTarget && !announcement && mgrNotice ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="混雑のお知らせ"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center"
+        >
+          <div className="w-full max-w-sm rounded-[var(--radius)] bg-[var(--surface)] p-5">
+            <p className="text-sm leading-relaxed">{mgrNotice.text}</p>
+            <div className="mt-4 flex">
+              <button
+                onClick={() => setMgrNotice(null)}
                 className="flex-1 rounded-full bg-[var(--accent)] px-4 py-2.5 font-semibold text-white"
               >
                 閉じる

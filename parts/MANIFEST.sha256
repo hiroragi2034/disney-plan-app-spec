@@ -1,24 +1,16 @@
 # MANIFEST.sha256 — 配布形v2 パーツ同一性マニフェスト
-# 生成：2026-11-18（記録BH）。本家のプロジェクトからのバイト単位コピー（出所照合済み）を、
-# リポジトリに投入したコミット ba93ed41 の内容とSHA-256で再照合したステージングから生成した。
-# 更新：2026-11-21（記録BT）。parts/server/src/actions.ts（待ち時間参考サイトの固定登録の除去・聞き返しの指示文の追加）と parts/server/src/schema.ts（コメントの例の除去）と parts/drizzle/meta/_journal.json と移行0018の名称を更新した。他の全エントリは不変で、再照合済みである。
-# リポジトリに投入したコミット ba93ed41 の内容とSHA-256で再照合したステージングから生成した。
-# 更新：2026-11-21（記録BT）。parts/server/src/actions.ts（待ち時間参考サイトの固定登録の除去・聞き返しの指示文の追加）と parts/server/src/schema.ts（コメントの例の除去）と parts/drizzle/meta/_journal.json と移行0018の名称を更新した。他の全エントリは不変で、再照合済みである。
-# 形式：<SHA-256>  <バイト数>  <リポジトリルートからの相対パス>
-# 照合方法：組み込んだパーツの全ファイルについて、この表のSHA-256と一致することを確認する（第28節・自己検証の第1層）。
-# このファイル自身は照合対象に含めない。対象は parts/ 配下の全ファイルと data/ 配下の全ファイル。
-757c1afc6c9b0fe65ebd1bbc5764cada0e92e85905dd201e38fbdfc895000e8f  2091  data/area-points.json
-50a587eda645cc5cc2f9838052b2134b4532a8e2796b5c249775aa1080965353  32369  data/facility-coordinates.json
-6914bb5e4aaa1be847d5d241db96ed29bb33cdf94e64825e3fa956f933a93c35  3051  parts/README.md
+# 生成：2026-11-21（記録BV）。本家の現在のソースから、本番種別の定義に従って
+# 生成したパーツ一式について、各ファイルのSHA-256とバイト数を記録する。
+cf6f915aec86ec73ea0cea60b091025c5cc314ab0ac1985763013ef0b05be606  3802  parts/README.md
 e828666e5d505cbc481c7ddddd0d16000832fc26faf4177f3e312db2fdf1c4cc  361  parts/client/build.mjs
 c6fb34223ade689a910e81260ab130bac182c4bc6b88ea12c5f6ff2a0ad903aa  670  parts/client/index.html
-c2c6fde83bd5a33861d74af82c3fd9541fe266f01e18ee849a31303f70a3c8e6  255330  parts/client/src/App.tsx
+c481f8405aed1c8b7b180f54552f03657abafaa9d69cabf5ccd020461c8cb185  263554  parts/client/src/App.tsx
 b37eff4d0ae161ae983d7fe49eab48f352dd64b832deb93d6298d7e689885f69  935  parts/client/src/api.ts
 35d26ea66c86da9701e4f4b467913481ffeae910761cea34c775c5dacb7f8eaa  24  parts/client/src/globals.d.ts
 300d8cb852036ce595743f0941fe91a34f16714730d40718ff6712e6d9253b2a  1151  parts/client/src/main.tsx
 34bd541a6921a2b3ccd806c0def5165cd896994d2330c400709cbdb39ccbe48e  31120  parts/client/src/map_helpers.mjs
-f11ceae06b89a7787bd9ae90fdf92be6f512d09578ec2daffa50b858d62ee434  68375  parts/client/src/pdf.ts
-190952fb0386af1a368afe46ca8fc83e642b91224d08f9e10b115e7ebdbb0bf5  10230  parts/client/src/plan_metrics.ts
+29117cea79d1e463950c06a7295c11c6df933bccdc613b7ce7dc485b454d6e86  68365  parts/client/src/pdf.ts
+7911f02ce8d90d029997fd6d54ecfa2dc23f7c3c19a7d6d2ffb0cacf17e96f00  10301  parts/client/src/plan_metrics.ts
 51f29b0df1a67136631e1f0de18826cf9a758b43b2c2a6ea63fba87626aa9e60  6447  parts/client/src/theme.css
 f80c5bf6f7a9bf54eda650a2ac2fcc4390051e8c56a52d5be51e5cbf641b7ba9  118  parts/drizzle/0001_initial.sql
 abbf1da4224a6731f4687e14a9d6ff29df41067b387ae4b343e38816f2e33c0e  1558  parts/drizzle/0002_disney_plan_app_tables.sql
@@ -37,7 +29,7 @@ f51fde0decbf0c6101bd52d4e3679673732d528d01f19b42a738fedbe38eb704  936  parts/dri
 c6d51c78ca91dc18f4f78160fa467035e9f456f5c405cb1619d5315dc1229426  140  parts/drizzle/0015_add_verification_record_and_dpa_purchase_time.sql
 6f4e6a2e3f867de1c1097193ce4d3187f4aff00c16e0090806a4dcece9b8b8bf  715  parts/drizzle/0016_clear_set_6_rebuild_marker.sql
 be572ea566fd1de31fdabcd97ea8eb824bf66b4611106f7ea9ffd20db52d9f97  61  parts/drizzle/0017_add_dpa_snapshot_text.sql
-9dfdf2da277dfbe094953b7005f4cce9823ed93b3d731fb5397eea855c876c5e  631  parts/drizzle/0018_registers_no_wait_time_sources.sql
+71e3ace082a7653e3093e86d06acccb82455bcb850d77dc1af63ac4f658ab702  189  parts/drizzle/0018_registers_no_wait_time_sources.sql
 bf5b01ade8862d622af81d4f70e5d1c4bdbf0e8d5df9e5fe0d9c385095305a22  863  parts/drizzle/0019_add_walking_speed_and_travel_times.sql
 d1bcd3438041a1d07728aa9b7e8338906834eda61d4e8b841ecf1dcee2ae5b83  15601  parts/drizzle/0020_register_area_travel_matrix_real_data.sql
 7b71d743df4ce7cd86b1a9df9c158c8cafeb9dbc62255d4ec0f5e5e436f036f1  491  parts/drizzle/0021_add_same_day_search.sql
@@ -54,9 +46,21 @@ d872c27c50bd984cb2eeafb3909168048c33822a601a80373166ab725019a650  650  parts/dri
 40d9a75002c0f45d2f793d65435d4725fed353e8ec3ed2e14f9299f080879544  429  parts/drizzle/0032_add_fact_build_value_diff_and_invalidation.sql
 ae63b67617943c2dc533379f396499ed82d52f19bd9b85b382442ac84878d9e2  62  parts/drizzle/0033_add_purchase_count_to_plan_items.sql
 ceffae5aedf8d7a5f7e584918020ed50b037772a8f18f5dd5ab3894d5642787c  145  parts/drizzle/0034_add_generation_escape_state.sql
-38c13dc5b19e05e58397a50c8b6306a3f18972f813b1488c803e86338a93d4ff  5403  parts/drizzle/meta/_journal.json
+c37397af110b319e971d4eb72519646001c8441ec9f5c7b4ef1ae9b6e91339d8  35270  parts/drizzle/0035_seed_facility_dictionary_from_distribution_data.sql
+04bf859bf7b00fc2fe2b9c4a6d90922a7c3c3e07b85f7f127b7b99c08cd812c6  4275  parts/drizzle/0036_add_acquisition_plan_layer.sql
+d66e94d7671d7ceb3152d1a92a42728f33d59853b47667e6cf2e1af67a43bfc2  1088  parts/drizzle/0037_acquisition_plan_v3_sitemap_tree_and_storehouse.sql
+ca8d0274e02527fda8f8fcbd003307cd56cff6e133e0c4886259b94a20a1787f  767  parts/drizzle/0038_add_run_logs.sql
+4718dd8602f56699f129aa21d779f45ada9c2f1ae8924f44d9c3083b90f3b905  180  parts/drizzle/0039_add_dpa_debug_runs.sql
+4718dd8602f56699f129aa21d779f45ada9c2f1ae8924f44d9c3083b90f3b905  180  parts/drizzle/0040_add_debug2_runs.sql
+4718dd8602f56699f129aa21d779f45ada9c2f1ae8924f44d9c3083b90f3b905  180  parts/drizzle/0041_add_debug2_step_records.sql
+4718dd8602f56699f129aa21d779f45ada9c2f1ae8924f44d9c3083b90f3b905  180  parts/drizzle/0042_add_debug3_runs.sql
+4718dd8602f56699f129aa21d779f45ada9c2f1ae8924f44d9c3083b90f3b905  180  parts/drizzle/0043_add_debug4_runs.sql
+4718dd8602f56699f129aa21d779f45ada9c2f1ae8924f44d9c3083b90f3b905  180  parts/drizzle/0044_add_debug5_runs.sql
+93469ee99ee3d4aa6948e1c546e4e800e5b29820ce56a85e3f04715685825fd9  2888  parts/drizzle/0045_add_task_manager_tables.sql
+e456863c4c8d43dfc85b6a60a7986ef453bfbfd29210bd7d0314b4b4feae7b2c  1295  parts/drizzle/0046_task_manager_production_kinds.sql
+71c66a76a17ee033a574a7e3d7b89c8b9d9bc3c6de0a1656c4b173097c18f945  608  parts/drizzle/0047_task_manager_kinds_15_17_and_dialog_notices.sql
+8a150f090f4993e7c1fdde08dcd4e2bb7307bf7b2a5dda4a7560f1f0babc868b  7408  parts/drizzle/meta/_journal.json
 b04db66662cf5896b0db58cbbea583473ab035743aef45daa9829517e8752757  953  parts/package.json
-6cafad8985297938490401dc4cb4567532055d9d77d8e7c4ffc1492143402454  817233  parts/server/src/actions.ts
-4542cb92ea6b890536f574c2ebbbefb8ccbbf882b1a0fd8e3bc662c67fe9905c  16267  parts/server/src/facility_seed.ts
-4d3f340666ca01438980679e522c88c69840307b1c0ec3e69e6a4e03eccbc5d2  49638  parts/server/src/schema.ts
-9867c2cdd2327582e30b123608a11845c50ea252b95c78874f1517452ebb248c  43393  parts/server/src/task-manager.js
+a2b0b14c47dfaeb2cce4d5d25c5990c50ce87a404bec96b084b47733f8bfd771  1040006  parts/server/src/actions.ts
+a11ea06c80b81507256496d1f22ed83a25a3df969c2359713762f298101b647b  16280  parts/server/src/facility_seed.ts
+f55939e10762c98f55add2982a86d0718c463c694b56462af1856c09b65d9d0b  67101  parts/server/src/schema.ts

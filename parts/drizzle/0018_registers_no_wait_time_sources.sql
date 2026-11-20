@@ -1,11 +1,3 @@
--- 0018: Registers no wait-time reference sites.
--- Earlier this migration inserted two sites with fixed names and URLs.
--- That contradicted the spec (test T64): wait-time reference sites are
--- registered only as a result of build-time research (SPEC section 11)
--- and their registrations exist only in the database. Record BQ
--- (2026-11-20) removed the fixed inserts; this migration is kept as a
--- no-op so the migration sequence is unchanged.
--- A single no-op statement is kept because a migration file with
--- no statement at all is rejected by the migration runner
--- (record BR, found by the rebuild-3 build).
+-- 本番種別では待ち時間参考サイトを固定登録しない（テストT64）。
+-- 登録は構築時調査の結果として saveWaitTimeSources でのみ行う。
 SELECT 1;

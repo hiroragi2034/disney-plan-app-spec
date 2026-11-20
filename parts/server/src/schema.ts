@@ -9,11 +9,11 @@
 //   bundled in code or seeds.
 
 import {
-  integer,
-  real,
-  sqliteTable,
-  text,
-  uniqueIndex,
+integer,
+real,
+sqliteTable,
+text,
+uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
 export const conditions = sqliteTable("conditions", {
@@ -681,6 +681,14 @@ export const sourceSnapshots = sqliteTable("source_snapshots", {
       "show_schedule",
       "ticket_prices",
       "announcements",
+      // The target month's calendar page (park hours for the month)
+      // and the park's restaurant list page — nodes of the
+      // acquisition plan tree (v3). Neither carries count
+      // declarations the server can recount in the DPA/list sense,
+      // so snapshots of these kinds are material, never the grounds
+      // of a normalized fact build by themselves.
+      "monthly_calendar",
+      "restaurant_list",
       // One restaurant's official detail page, stored verbatim as
       // the grounds for that restaurant's facts (restaurant_facts).
       // Not a canonical-source kind: detail pages carry no count
@@ -919,6 +927,130 @@ export const restaurantFacts = sqliteTable("restaurant_facts", {
     .$defaultFn(() => new Date()),
 });
 
+// ---------- acquisition plan layer v3 （取得計画層） ----------
+//
+// The acquisition of the canonical sources is split into a PLAN
+// layer and an EXECUTION layer (owner's design, 2026-11-19,
+// finalised as "acquisition plan v3"). The plan is a TREE built
+// from the official sitemap
+// (https://www.tokyodisneyresort.jp/sitemap.xml, a plain HTTP GET
+// — no browser): each node is one page of the tree plus its
+// operations and its anchor. What is stored is only what the
+// rebuild decision needs: the sitemap URL set restricted to the
+// branches the plan uses (acquisition_plans.sitemap_urls_json),
+// the tree itself (acquisition_plan_nodes), and the plan's
+// creation instant. There is ONE clock: plan and snapshots are
+// valid for 3 hours. The rebuild decision is made from the clock
+// and the sitemap GET alone (never a browser fetch); after expiry,
+// the first turn rebuilds the whole tree from the sitemap (never a
+// partial revision), and that rebuild's fetches double as the
+// run's execution material. If the sitemap's URL set shows no
+// added / removed / moved branch among the ones the plan uses,
+// the skeleton counts as identical. There are no per-row states,
+// no revision flags and no fact-build reuse in v3: fact building
+// always happens from the current run's material.
+//
+// acquisition_plans: the single plan record (one row).
+export const acquisitionPlans = sqliteTable("acquisition_plans", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  // The sitemap the plan was built from.
+  sitemapUrl: text("sitemap_url").notNull(),
+  // JSON array of sitemap URL paths (Japanese tree only) under the
+  // branches the plan uses — the basis of the skeleton comparison
+  // at the next rebuild.
+  sitemapUrlsJson: text("sitemap_urls_json").notNull(),
+  // Total number of URLs in the sitemap at build time (context for
+  // the subset above).
+  sitemapTotalCount: integer("sitemap_total_count").notNull(),
+  // When this plan (tree) was built. The 3-hour clock runs from
+  // here for the plan; snapshot freshness runs from each
+  // snapshot's own fetched_at.
+  planCreatedAt: integer("plan_created_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  // When the sitemap was actually fetched for this build (server
+  // wall clock; planCreatedAt may be an evaluation instant a test
+  // supplied via planAcquisition's atTime).
+  sitemapFetchedAt: integer("sitemap_fetched_at", {
+    mode: "timestamp_ms",
+  }),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+// One node of the plan tree: a page, how to fetch it (operations),
+// and what must hold in its text (anchor). scope "common" = one
+// page shared by both parks (its snapshots are still stored per
+// park); scope "park" = one page per park, its URL template
+// carrying {P} (tds/tdl) and, for the daily node, {D} (target date
+// YYYYMMDD). Common rules for every node: no scrolling anywhere;
+// an expansion ends only when the enumerated count equals the
+// declared count (the anchor — never a button's presence or
+// wording); the non-target park's side is never opened; identity
+// is judged by the fetched page's own anchor, never by a separate
+// check page.
+export const acquisitionPlanNodes = sqliteTable("acquisition_plan_nodes", {
+  nodeKey: text("node_key").primaryKey(),
+  scope: text("scope", { enum: ["common", "park"] }).notNull(),
+  // JSON array of the source_snapshots kinds this node produces
+  // (the daily node produces both "operations" and
+  // "show_schedule").
+  kindsJson: text("kinds_json").notNull(),
+  // URL path template with {P} / {D} placeholders, relative to
+  // https://www.tokyodisneyresort.jp/.
+  urlTemplate: text("url_template").notNull(),
+  // Fragment matched against a stored snapshot's URL to decide
+  // which node that snapshot belongs to. (One anchor-based
+  // exception for the facility_list nodes lives in
+  // snapshotMatchesPlanNode in actions.ts: the attraction page
+  // enumerates both lists, so a snapshot whose verified anchors
+  // cover the show list also belongs to the show node.)
+  urlMatch: text("url_match").notNull(),
+  // URL fragments carrying the page state for a direct open (the
+  // DPA node's per-park tab + expansion state). Null elsewhere.
+  stateFragmentLand: text("state_fragment_land"),
+  stateFragmentSea: text("state_fragment_sea"),
+  // The operations column: the exact procedure for fetching this
+  // node (main / fallback), in the plan's fixed vocabulary.
+  operations: text("operations").notNull(),
+  // The anchor column: what must hold in the fetched text for the
+  // node to count as verified.
+  anchor: text("anchor").notNull(),
+  note: text("note"),
+  // JSON object {land: boolean, sea: boolean}: whether this
+  // node's branch existed in the sitemap the plan was built from,
+  // per park. A node whose branch is gone is skipped by
+  // planAcquisition for that park (premise breakage, surfaced —
+  // never silently fetched at a dead URL).
+  branchParksJson: text("branch_parks_json").notNull(),
+});
+
+// The restaurant detail pages hanging under each park's
+// restaurant-list node (the tree's leaves). Their acquisition is
+// storehouse-first (the Cloudflare storehouse's bundle), so the
+// plan only needs the registry of known leaf URLs: learned from
+// the storehouse (its registered list / bundle) and from this
+// copy's own restaurant_detail snapshots.
+export const acquisitionRestaurantLeaves = sqliteTable(
+  "acquisition_restaurant_leaves",
+  {
+    url: text("url").primaryKey(),
+    park: text("park", { enum: ["land", "sea"] }).notNull(),
+    // Where this copy learned the URL: "storehouse" (the
+    // storehouse's list or bundle) or "snapshot" (its own stored
+    // restaurant_detail snapshot).
+    source: text("source", { enum: ["storehouse", "snapshot"] })
+      .notNull(),
+    firstSeenAt: integer("first_seen_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+);
+
 // Area-to-area travel matrix （エリア間マトリクス）: typical walking
 // minutes between two areas of one park, accumulated at runtime from
 // web guide sources — the same "the user's own DB accumulates what
@@ -967,3 +1099,242 @@ export const areaTravelTimes = sqliteTable(
     ),
   ],
 );
+
+// ------------------------------------------------------------ run logs
+//
+// Per-execution process record （過程記録） for the long-running
+// operations — whole-set generation, same-day search, and partial
+// replacement (owner's decision, 2026-11-19). One run_logs row per
+// execution (a retry is a NEW execution with its own row), tied to
+// the plan set it worked on; run_log_events holds the timestamped
+// trail: phase boundaries （取得 / ファクト構築 / 下書き / 保存・検証）,
+// one start/end pair per fetched page, and one start/end pair per
+// AI-driven step, each with the step's label. The record exists so
+// that when a run stops midway, "where, and inside which call, it
+// stopped" can always be identified afterwards.
+//
+// A run is ALWAYS closed exactly once: outcome succeeded (saved),
+// failed (a reported reason, or — when the task died without
+// reporting — an explicit 理由不明）, cancelled (user), or
+// interrupted (superseded by a retry's new run). Closing derives
+// the last completed phase and the in-progress step from the event
+// trail and records the elapsed time, so a closed record never
+// leaves the reader guessing. Rows survive plan-set deletion (the
+// forensic value is precisely for runs whose set is gone); the
+// full reset wipes them with everything else.
+export const runLogs = sqliteTable("run_logs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  planSetId: integer("plan_set_id").notNull(),
+  kind: text("kind", { enum: ["generation", "same_day", "partial"] })
+    .notNull(),
+  // Target slot for a partial replacement; null for whole-set runs.
+  slot: text("slot", { enum: ["A", "B", "C"] }),
+  status: text("status", { enum: ["open", "closed"] })
+    .notNull()
+    .default("open"),
+  outcome: text("outcome", {
+    enum: ["succeeded", "failed", "cancelled", "interrupted"],
+  }),
+  startedAt: integer("started_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  closedAt: integer("closed_at", { mode: "timestamp_ms" }),
+  // Why the run closed. For a failure this states the last
+  // completed phase, the step in progress, the elapsed time and
+  // the reason — or explicitly 理由不明 when no reason was ever
+  // reported. Null while the run is open.
+  closeReason: text("close_reason"),
+  // Phase keys (acquisition / fact_build / research / drafting /
+  // save_verify), maintained from the event trail as events are
+  // appended.
+  lastCompletedPhase: text("last_completed_phase"),
+  currentPhase: text("current_phase"),
+});
+
+export const runLogEvents = sqliteTable("run_log_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  runId: integer("run_id").notNull(),
+  at: integer("at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  eventType: text("event_type", {
+    enum: [
+      "run_open",
+      "phase_start",
+      "phase_end",
+      "fetch_start",
+      "fetch_end",
+      "ai_call_start",
+      "ai_call_end",
+      "note",
+      "run_close",
+    ],
+  }).notNull(),
+  phase: text("phase", {
+    enum: ["acquisition", "fact_build", "research", "drafting", "save_verify"],
+  }),
+  // What this event is about, in the reporter's own words (a page
+  // name / URL for a fetch, a step name for an AI call).
+  label: text("label").notNull(),
+  detail: text("detail"),
+});
+
+// ------------------------------------------------- Task manager （裏タスク管理・検証6）
+//
+// The background-task manager (owner's design, 2026-11-20): the
+// server side owns ALL control of background tasks and never
+// trusts them. The only instructions ever given to a task are
+// "start" (a spawn whose assignment is to call this attempt's own
+// record action) and "cancel" (the attempt is closed server-side;
+// a late record call for a closed attempt is refused). A task is
+// unstable by premise: it may never start, or start and then stop
+// without a word. The server can only cancel and retry.
+//
+// ALL state lives in these tables — spawn instant, attempt
+// number, deadlines, status — never in memory, so closing the app
+// or Muse itself loses nothing. A periodic server-side check
+// (checkTaskManager, run on a schedule) judges deadlines purely
+// from the recorded instants:
+// - no first record call within startTimeoutSec of the spawn →
+//   the attempt is closed as cancelled and a new attempt starts;
+// - started but not finished within totalTimeoutSec of the spawn
+//   → same;
+// - attempts exhausted → the run closes as "forced"
+//   （試行回数を超えたので強制終了）. A run's final state is ONLY
+//   "succeeded" or "forced" — it never stays "running" forever.
+// Parameters are per kind (task_mgr_params), editable at runtime.
+//
+// Since the production integration (2026-11-20), this layer IS
+// the single entry point for the app's production background
+// tasks: plan creation (kinds 11: whole-set generation, partial
+// replacement, day-of reschedule), same-day search (12), chat
+// research (13), bulk re-verification (14), the wait-time
+// reference site list update (15), the facility image fetch
+// (16) and the one-time restaurant fact correction (17) all
+// start ONLY through the manager — no production path spawns a
+// task directly. A production run carries its target in
+// target_json (which plan set / slot / research request /
+// verification request it works on); retries re-run the SAME
+// target, and a plan set is created exactly once, by the
+// server, before the first attempt. Kinds 1..10 remain the
+// manager's own test kinds, driven by task_mgr_tests.
+export const taskMgrParams = sqliteTable("task_mgr_params", {
+  // Task kind 1..10 (manager test) or 11..17 (production; see
+  // TASK_MGR_KINDS / TASK_MGR_PROD_KINDS in actions.ts).
+  kind: integer("kind").primaryKey(),
+  startTimeoutSec: integer("start_timeout_sec").notNull(),
+  totalTimeoutSec: integer("total_timeout_sec").notNull(),
+  maxAttempts: integer("max_attempts").notNull(),
+});
+
+// One test run of the manager: 100 executions, kinds cycling
+// 1→10, strictly one at a time. Status: running / done (all 100
+// closed) / cancelled (the whole-test cancel button).
+export const taskMgrTests = sqliteTable("task_mgr_tests", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  status: text("status", { enum: ["running", "done", "cancelled"] })
+    .notNull()
+    .default("running"),
+  total: integer("total").notNull().default(100),
+  startedAt: integer("started_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  closedAt: integer("closed_at", { mode: "timestamp_ms" }),
+  closeReason: text("close_reason"),
+});
+
+// One execution: within a test (one of the 100) or, since the
+// production integration, one production processing run. A test
+// run's final state is only "succeeded" or "forced";
+// "cancelled" appears when the whole test was cancelled
+// mid-execution, when a production run's target was cancelled by
+// the user, or when a newer start superseded the run.
+export const taskMgrRuns = sqliteTable("task_mgr_runs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  // The owning test; null for production runs.
+  testId: integer("test_id"),
+  // 1..100 within the test; 0 for production runs.
+  seq: integer("seq").notNull().default(0),
+  kind: integer("kind").notNull(),
+  status: text("status", {
+    enum: ["running", "succeeded", "forced", "cancelled"],
+  })
+    .notNull()
+    .default("running"),
+  finalReason: text("final_reason"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  closedAt: integer("closed_at", { mode: "timestamp_ms" }),
+  // Production runs only: the spawn target as JSON — what this
+  // run works on ({type:"generation"|"same_day", planSetId} /
+  // {type:"partial", planSetId, slot} / {type:"research",
+  // researchId} / {type:"verification", requestId} /
+  // {type:"wait_sources", requestId} / {type:"item_images",
+  // planSetId} / {type:"restaurant_correction"}). A retry
+  // re-runs exactly this target; the completion hooks and the
+  // periodic check find the run through it. Null on test runs.
+  targetJson: text("target_json"),
+});
+
+// One attempt of one execution. spawnedAt / deadlines are stamped
+// by the SERVER at spawn time from the kind's parameters; the
+// first record call (firstCallAt) is the only accepted evidence
+// that the task started. A closed attempt refuses late calls.
+export const taskMgrAttempts = sqliteTable("task_mgr_attempts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  runId: integer("run_id").notNull(),
+  attemptNo: integer("attempt_no").notNull(),
+  status: text("status", {
+    enum: ["awaiting_start", "running", "succeeded", "cancelled"],
+  })
+    .notNull()
+    .default("awaiting_start"),
+  spawnedAt: integer("spawned_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  startDeadlineAt: integer("start_deadline_at", {
+    mode: "timestamp_ms",
+  }).notNull(),
+  totalDeadlineAt: integer("total_deadline_at", {
+    mode: "timestamp_ms",
+  }).notNull(),
+  firstCallAt: integer("first_call_at", { mode: "timestamp_ms" }),
+  finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
+  closeReason: text("close_reason"),
+});
+
+// One record call from a task to its attempt's record action.
+// calledAt is the SERVER's receipt stamp. savedText holds the
+// page text for the kinds that save one (6 / 9 / 10), truncated
+// server-side; textLength is the full length the task reported
+// by passing the text.
+export const taskMgrCalls = sqliteTable("task_mgr_calls", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  attemptId: integer("attempt_id").notNull(),
+  phase: text("phase").notNull(),
+  calledAt: integer("called_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  note: text("note"),
+  textLength: integer("text_length"),
+  savedText: text("saved_text"),
+});
+
+// A dialog notice raised by the task manager: when one of the
+// three auxiliary production processings (wait-time reference
+// site list update / facility image fetch / one-time restaurant
+// fact correction — kinds 15..17) exhausts its attempts, the
+// failure is surfaced to the user as an in-app dialog carrying
+// the one common congestion text, not on a plan tab or in the
+// chat. getState offers the oldest unshown notice; the client
+// captures it into a dialog and marks it shown
+// (markMgrDialogShown), so each notice is displayed once.
+export const mgrDialogNotices = sqliteTable("mgr_dialog_notices", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  text: text("text").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  shownAt: integer("shown_at", { mode: "timestamp_ms" }),
+});
