@@ -1,6 +1,7 @@
 # MANIFEST.sha256 — 配布形v2 パーツ同一性マニフェスト
-# 生成：2026-11-22（記録DE・DF。生成方法は記録BV）。本家の現在のソースから、本番種別の定義に従って
-# 生成したパーツ一式について、各ファイルのSHA-256とバイト数を記録する。
+# 生成：2026-11-22（記録DG。生成方法は記録BV）。本家の現在のソースから、本番種別の定義に従って
+# 生成したパーツ一式について、各ファイルのSHA-256とバイト数を記録する。parts/README.md も照合の対象に含む。
+6273e83e65f5f2f81d92edfc3a1090f4614cdf3e8168b158019e867220baca5f  3802  parts/README.md
 e828666e5d505cbc481c7ddddd0d16000832fc26faf4177f3e312db2fdf1c4cc  361  parts/client/build.mjs
 c6fb34223ade689a910e81260ab130bac182c4bc6b88ea12c5f6ff2a0ad903aa  670  parts/client/index.html
 f74e4ab3bf74532fc383384840ee613a68b773a129249114db06b37b0ed4fb2e  265061  parts/client/src/App.tsx

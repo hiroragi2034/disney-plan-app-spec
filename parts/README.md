@@ -41,7 +41,7 @@ Layout mirrors the original project:
   task-management class, the acquisition plan layer and the run logging.
   Copy whole; do not split.
 - `server/src/schema.ts` — the data model. `drizzle/` — its SQL migrations
-  (the schema as actually evolved, 0001–0047; 0018 and 0039–0044 are
+  (the schema as actually evolved, 0001–0052; 0018 and 0039–0044 are
   emptied no-ops in this production build, see above).
 - `package.json` — the dependency manifest (`@hatch/space-sdk` is supplied
   by the platform; the rest are ordinary packages).
