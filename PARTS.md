@@ -26,7 +26,7 @@
 | PDF生成 | `parts/client/src/pdf.ts` | `client/src/pdf.ts` | 68,365 |
 | プラン集計 | `parts/client/src/plan_metrics.ts` | `client/src/plan_metrics.ts` | 10,301 |
 | クライアント配管・スタイル | `parts/client/src/{api.ts, main.tsx, theme.css, globals.d.ts}`、`parts/client/{index.html, build.mjs}` | 同名パス | 計9,588 |
-| サーバー全体（決定的ロジック・タスク管理クラス・取得計画・実行ログを含む） | `parts/server/src/actions.ts` | `server/src/actions.ts` | 1,045,334 |
+| サーバー全体（決定的ロジック・タスク管理クラス・取得計画・実行ログを含む） | `parts/server/src/actions.ts` | `server/src/actions.ts` | 1,045,598 |
 | 辞書の種（リセット時の初期状態の復元） | `parts/server/src/facility_seed.ts` | `server/src/facility_seed.ts` | 16,280 |
 | データモデル | `parts/server/src/schema.ts` | `server/src/schema.ts` | 67,101 |
 | スキーマ移行（SQL 47本＋ジャーナル） | `parts/drizzle/` | `drizzle/` | 計84,145 |
@@ -61,6 +61,8 @@
 記録BZ（2026-11-21）での更新：再構築検証6で見つかった不具合を本家側で直し、パーツを再生成した。内容は記録BZのとおり（規準セットの解決の3件制限の撤廃、部分差し替えで lastVerifiedAt を書かないこと、完了通知の案内文の判定を状態によるものへ変更、当日リスケでの「最初の10分」行の引き継ぎ手順、初回生成での手順2dの必須化、検証パッケージの所要時間表示の出所区別）。
 
 記録CA（2026-11-21）での更新：再構築検証7で見つかった不具合を本家側で直し、パーツを再生成した。内容は記録CAのとおり（生成の失敗通知への第12.8節の案内の追加、終わったセットの実行ログへの書き込みの停止）。
+
+記録CB（2026-11-21）での更新：内部のプロンプト検証（試作）で見つかった、DPAページのファクト構築における母集合の範囲の外れを本家側で直し、パーツを再生成した。内容は記録CBのとおり（手順1a(i)のファクト構築手順に、抽出の対象は母集合に含まれる施設だけであることを明記した）。
 
 drizzle 0020 は、エリア間移動マトリクスの実データを登録する移行であり、
 スキーマだけでなく確定データも含んでいる。そのまま含めた。
