@@ -28,7 +28,7 @@
 | クライアント配管・スタイル | `parts/client/src/{api.ts, main.tsx, theme.css, globals.d.ts}`、`parts/client/{index.html, build.mjs}` | 同名パス | 計9,588 |
 | サーバー全体（決定的ロジック・タスク管理クラス・取得計画・実行ログを含む） | `parts/server/src/actions.ts` | `server/src/actions.ts` | 860,802 |
 | 辞書の種（リセット時の初期状態の復元） | `parts/server/src/facility_seed.ts` | `server/src/facility_seed.ts` | 16,280 |
-| プロンプトファイル（AI指示文の本体と読み込み） | `parts/server/src/prompts/prompts.json`、`parts/server/src/prompts/loader.ts`、`parts/server/src/prompts/json.d.ts` | 同名パス | 計218,847 |
+| プロンプトファイル（AI指示文の本体と読み込み） | `parts/server/src/prompts/prompts.json`、`parts/server/src/prompts/loader.ts`、`parts/server/src/prompts/json.d.ts` | 同名パス | 計219,981 |
 | データモデル | `parts/server/src/schema.ts` | `server/src/schema.ts` | 69,286 |
 | スキーマ移行（SQL 47本＋ジャーナル） | `parts/drizzle/` | `drizzle/` | 計84,802 |
 | 依存マニフェスト | `parts/package.json` | `package.json` | 953 |
@@ -72,6 +72,8 @@
 記録CE（2026-11-21）での更新：内部のプロンプト検証（当日ページ抽出）で見つかった、公演スケジュールに載っているが公式公演時刻がページに示されていないショーを黙って落とす外れを本家側で直し、パーツを再生成した。内容は記録CEのとおり（手順1aの日付層の部分と検証データの unverified の定義に、その形のショーは取得できなかったものとして unverified に理由つきで挙げることを明記した。prompts.json は版2になった）。
 
 記録CF（2026-11-21）での更新：内部のプロンプト検証（アトラクション一覧の抽出）で材料として残った弱点4件（行の整形・分類印・不完全な材料の返し方・重複行と他パークの施設の扱いに、手順文の定めが無い）への締め直しを本家側で行い、パーツを再生成した。内容は記録CFのとおり（手順1a (i) (a) の母集合の読み取りに、行の整形・分類印は名前の一部・重複は1件・他パークの施設も含める・確定できない材料からは部分的な母集合を作らない、を明記した。prompts.json は版3になった）。
+
+記録CG（2026-11-21）での更新：内部のプロンプト検証（ショー一覧の抽出）で材料として残った弱点のうち、記録CFで解消していない3件（エリアが先頭にある形の定めが無い・詳細行の名前の切り分けの定めが無い・他パークの一覧が塊として続く場合の読み分けの定めが無い）への締め直しを本家側で行い、パーツを再生成した。内容は記録CGのとおり（手順1a (i) (a) の読み取りに、エリアは行頭にも書かれ所属エリアとして読む・行に無ければエリア無し・名前の後の期間・種別・説明・公演時間・対象の注記は名前に含めない・他のパークの一覧の塊は読まない、を明記した。分類印の弱点は記録CFで解消済みのため触っていない。prompts.json は版4になった）。
 
 drizzle 0020 は、エリア間移動マトリクスの実データを登録する移行であり、
 スキーマだけでなく確定データも含んでいる。そのまま含めた。

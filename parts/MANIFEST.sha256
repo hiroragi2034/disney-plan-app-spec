@@ -1,5 +1,5 @@
 # MANIFEST.sha256 — 配布形v2 パーツ同一性マニフェスト
-# 生成：2026-11-21（記録CF。生成方法は記録BV）。本家の現在のソースから、本番種別の定義に従って
+# 生成：2026-11-21（記録CG。生成方法は記録BV）。本家の現在のソースから、本番種別の定義に従って
 # 生成したパーツ一式について、各ファイルのSHA-256とバイト数を記録する。
 cf6f915aec86ec73ea0cea60b091025c5cc314ab0ac1985763013ef0b05be606  3802  parts/README.md
 e828666e5d505cbc481c7ddddd0d16000832fc26faf4177f3e312db2fdf1c4cc  361  parts/client/build.mjs
@@ -66,5 +66,5 @@ b04db66662cf5896b0db58cbbea583473ab035743aef45daa9829517e8752757  953  parts/pac
 a11ea06c80b81507256496d1f22ed83a25a3df969c2359713762f298101b647b  16280  parts/server/src/facility_seed.ts
 9f21e31889690f61957595b076812e611fa388c4d5a4368f562a260f92ad04db  264  parts/server/src/prompts/json.d.ts
 ab71378fb6bc28b87e2641820695795c3044baefbdca4d660df9c0b9d8cbd1d9  7729  parts/server/src/prompts/loader.ts
-d9011e385eb44fad10078a056056e08abdedffb14005d67d7bc9121f7fc3dc8d  210854  parts/server/src/prompts/prompts.json
+700da36bce5bef0c5a82fe160703970180347b0bb8f58d53b413f76e6a27a055  211988  parts/server/src/prompts/prompts.json
 d82cf4bdc903adec53e6839cc05e749f994d11968d49516d5a6db4fa926ef7f1  69286  parts/server/src/schema.ts
