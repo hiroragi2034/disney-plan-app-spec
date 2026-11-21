@@ -1,10 +1,10 @@
 # MANIFEST.sha256 — 配布形v2 パーツ同一性マニフェスト
-# 生成：2026-11-21（記録CC。生成方法は記録BV）。本家の現在のソースから、本番種別の定義に従って
+# 生成：2026-11-21（記録CD。生成方法は記録BV）。本家の現在のソースから、本番種別の定義に従って
 # 生成したパーツ一式について、各ファイルのSHA-256とバイト数を記録する。
 cf6f915aec86ec73ea0cea60b091025c5cc314ab0ac1985763013ef0b05be606  3802  parts/README.md
 e828666e5d505cbc481c7ddddd0d16000832fc26faf4177f3e312db2fdf1c4cc  361  parts/client/build.mjs
 c6fb34223ade689a910e81260ab130bac182c4bc6b88ea12c5f6ff2a0ad903aa  670  parts/client/index.html
-c481f8405aed1c8b7b180f54552f03657abafaa9d69cabf5ccd020461c8cb185  263554  parts/client/src/App.tsx
+f74e4ab3bf74532fc383384840ee613a68b773a129249114db06b37b0ed4fb2e  265061  parts/client/src/App.tsx
 b37eff4d0ae161ae983d7fe49eab48f352dd64b832deb93d6298d7e689885f69  935  parts/client/src/api.ts
 35d26ea66c86da9701e4f4b467913481ffeae910761cea34c775c5dacb7f8eaa  24  parts/client/src/globals.d.ts
 300d8cb852036ce595743f0941fe91a34f16714730d40718ff6712e6d9253b2a  1151  parts/client/src/main.tsx
@@ -59,8 +59,12 @@ ca8d0274e02527fda8f8fcbd003307cd56cff6e133e0c4886259b94a20a1787f  767  parts/dri
 93469ee99ee3d4aa6948e1c546e4e800e5b29820ce56a85e3f04715685825fd9  2888  parts/drizzle/0045_add_task_manager_tables.sql
 e456863c4c8d43dfc85b6a60a7986ef453bfbfd29210bd7d0314b4b4feae7b2c  1295  parts/drizzle/0046_task_manager_production_kinds.sql
 71c66a76a17ee033a574a7e3d7b89c8b9d9bc3c6de0a1656c4b173097c18f945  608  parts/drizzle/0047_task_manager_kinds_15_17_and_dialog_notices.sql
-8a150f090f4993e7c1fdde08dcd4e2bb7307bf7b2a5dda4a7560f1f0babc868b  7408  parts/drizzle/meta/_journal.json
+f1291021d74ddb80359db4717ce040be0414b7f4bd8adae8daf515e785b87bf5  509  parts/drizzle/0048_add_prompt_versions.sql
+a1856d0200fb06fa381828dbb4f084b91c93c5cf2283c2f18ce20027712b720d  7556  parts/drizzle/meta/_journal.json
 b04db66662cf5896b0db58cbbea583473ab035743aef45daa9829517e8752757  953  parts/package.json
-b211816e33a061daa3fe3d38bad984dfdb8f040cda34e1650ecb96caa1dca622  1046048  parts/server/src/actions.ts
+884f8e8994aab6856ac65757fab6cc31746b90fb72aca4cfd02d302d9fc287cc  860802  parts/server/src/actions.ts
 a11ea06c80b81507256496d1f22ed83a25a3df969c2359713762f298101b647b  16280  parts/server/src/facility_seed.ts
-f55939e10762c98f55add2982a86d0718c463c694b56462af1856c09b65d9d0b  67101  parts/server/src/schema.ts
+9f21e31889690f61957595b076812e611fa388c4d5a4368f562a260f92ad04db  264  parts/server/src/prompts/json.d.ts
+ab71378fb6bc28b87e2641820695795c3044baefbdca4d660df9c0b9d8cbd1d9  7729  parts/server/src/prompts/loader.ts
+a75e7ec93df6c84a4a6dc62de165080cfa39bbbf54302dfc5ed5c1d530e4c9a8  208127  parts/server/src/prompts/prompts.json
+d82cf4bdc903adec53e6839cc05e749f994d11968d49516d5a6db4fa926ef7f1  69286  parts/server/src/schema.ts

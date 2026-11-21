@@ -77,6 +77,46 @@ export const announcement = sqliteTable("announcement", {
     .$defaultFn(() => new Date()),
 });
 
+// Prompt versions (spec §22.3): the applied AI prompt bundle and
+// the immediately previous one, fetched from the distributor's
+// repository and applied automatically as an app update. At most
+// TWO rows: one state "applied", one state "previous" (the
+// rollback target). The bundle bundled with the app is the initial
+// state — no row exists until the first update has been applied.
+// resetUserData deliberately does NOT delete this table: like the
+// announcement, it is distribution-channel state, not user data
+// (spec §4).
+export const promptVersions = sqliteTable("prompt_versions", {
+  // The bundle's version (the prompts.json `ver`), primary key.
+  ver: integer("ver").primaryKey(),
+  // The whole prompts.json body, exactly as fetched (its SHA-256
+  // and size were verified against the manifest before saving).
+  bodyJson: text("body_json").notNull(),
+  sha256: text("sha256").notNull(),
+  size: integer("size").notNull(),
+  // The distribution record that issued this version, when the
+  // manifest named one.
+  recordRef: text("record_ref"),
+  state: text("state", { enum: ["applied", "previous"] }).notNull(),
+  fetchedAt: integer("fetched_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+// Prompt update state (spec §22.3): exactly ONE row (id = 1) with
+// the last update check's outcome. Written by every check —
+// applied, no update, or failed (with a machine-readable error
+// class) — so a failed check is a visible record, never a silent
+// one. Not user data; resetUserData does not delete it.
+export const promptUpdateState = sqliteTable("prompt_update_state", {
+  id: integer("id").primaryKey(),
+  lastCheckAt: integer("last_check_at", { mode: "timestamp_ms" }),
+  // "applied" | "no_update" | "failed".
+  lastResult: text("last_result"),
+  lastErrorClass: text("last_error_class"),
+  lastSeenVer: integer("last_seen_ver"),
+});
+
 export const messages = sqliteTable("messages", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   role: text("role", { enum: ["user", "assistant"] }).notNull(),
@@ -166,6 +206,11 @@ export const planSets = sqliteTable("plan_sets", {
     .notNull()
     .default("generating"),
   error: text("error"),
+  // The prompt version pinned to this set (spec §22.3): the first
+  // run's start writes the then-applied version here, and every
+  // run of this set uses that version while its bundle is held.
+  // Null until the first run starts.
+  promptsVer: integer("prompts_ver"),
   // How this set was created: "standard" = the usual pre-trip 3-plan
   // generation (プラン作成 tab button or chat), "same_day" = 当日検索 —
   // the emergency same-day entry for a visitor who arrived without a

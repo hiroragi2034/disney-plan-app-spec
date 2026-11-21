@@ -330,6 +330,13 @@
       "when": 1795145464304,
       "tag": "0047_task_manager_kinds_15_17_and_dialog_notices",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1795225015920,
+      "tag": "0048_add_prompt_versions",
+      "breakpoints": true
     }
   ]
 }

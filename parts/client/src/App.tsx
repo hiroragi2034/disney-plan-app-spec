@@ -5357,7 +5357,17 @@ const CUSTOMIZE_EXAMPLES: { wish: string; instruction: string }[] = [
   },
 ];
 
-function CustomizeHelpView() {
+function CustomizeHelpView({
+  promptVersion,
+}: {
+  promptVersion?: {
+    applied: number;
+    bundled: number;
+    lastCheckAt: string | null;
+    lastResult: string | null;
+    lastErrorClass: string | null;
+  };
+}) {
   const [copied, setCopied] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const [resetConfirming, setResetConfirming] = useState(false);
@@ -5539,6 +5549,16 @@ function CustomizeHelpView() {
           </button>
         )}
       </div>
+      <div className="mt-8 border-t border-[var(--border)] pt-4">
+        <p className="text-xs leading-relaxed text-[var(--dim)]">
+          アプリのアップデート（AIへの指示文）: 適用中 Ver{" "}
+          {promptVersion?.applied ?? "—"}（同梱版 Ver{" "}
+          {promptVersion?.bundled ?? "—"}）
+          {promptVersion?.lastCheckAt
+            ? ` / 最終確認 ${new Date(promptVersion.lastCheckAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}${promptVersion.lastResult === "failed" ? "（更新できませんでした。現在の版のまま動作しています）" : ""}`
+            : ""}
+        </p>
+      </div>
     </div>
   );
 }
@@ -5605,6 +5625,20 @@ export function App() {
         }
       })
       .catch(() => undefined);
+  }, []);
+
+  // Prompt update check (spec §22.3): rides along with the
+  // announcement check above. The server applies a newer prompt
+  // bundle automatically as an app update when it passes the frame
+  // validation; the client has nothing to show either way — the
+  // applied version is displayed at the end of the help tab (from
+  // getState), and a failed check leaves the current version in
+  // force.
+  const promptCheckedRef = useRef(false);
+  useEffect(() => {
+    if (promptCheckedRef.current) return;
+    promptCheckedRef.current = true;
+    void api.checkPromptUpdate({}).catch(() => undefined);
   }, []);
 
   const stateQuery = useQuery({
@@ -5868,7 +5902,7 @@ export function App() {
             pending={state.waitTimeSourcesPending}
           />
         ) : effectiveTab === "help" ? (
-          <CustomizeHelpView />
+          <CustomizeHelpView promptVersion={state?.promptVersion} />
         ) : activePlanSet ? (
           <PlanSetView
             key={activePlanSet.id}
