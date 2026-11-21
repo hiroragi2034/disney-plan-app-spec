@@ -31,6 +31,8 @@ import {
   type PromptBundle,
 } from "./prompts/loader";
 import { FACILITY_SEED, FACILITY_SEED_STAMP_MS } from "./facility_seed";
+import { WAIT_TIME_SEED } from "./wait_time_seed";
+import { TRAVEL_TIME_SEED } from "./travel_time_seed";
 
 // ---------- shared shapes ----------
 
@@ -3840,14 +3842,15 @@ const SPEC_REPAIR_GUIDANCE =
 //                   assumptions (quietest crowd scenario, lowest
 //                   waits, every trade-off bent in the user's
 //                   favour), still do not fit entry→exit / park hours.
-//   budget        — even the minimum spend (tickets + the minimum
-//                   cost of explicitly mandatory paid items) exceeds
-//                   the budget.
 //   contradiction — requirements that directly cannot coexist (two
 //                   places at the same time, etc.).
+// Budget is NOT a pattern (owner's decision, 記録CX): the amount
+// never rejects at the gate. Budget is always a soft condition —
+// a plan is built even when mandatory items exceed it, and the
+// overage is disclosed after generation (§9.2 class 13).
 // The judgement always leans optimistic: anything a trade-off can
-// rescue (fewer DPAs fit the budget, reordering resolves a clash,
-// a wait estimate decides whether it fits) is NEVER rejected, and
+// rescue (reordering resolves a clash, a wait estimate decides
+// whether it fits) is NEVER rejected, and
 // borderline cases proceed to normal generation. The pattern list
 // is closed — no other kind of "impossible" may be invented.
 //
@@ -3885,13 +3888,11 @@ const IMPOSSIBILITY_GUIDANCE_LINE =
 type ImpossibilityCategory =
   | "nonexistent"
   | "time"
-  | "budget"
   | "contradiction";
 
 const IMPOSSIBILITY_CATEGORY_LABELS: Record<ImpossibilityCategory, string> = {
   nonexistent: "存在しない",
   time: "時間が足りない",
-  budget: "予算オーバー",
   contradiction: "矛盾する要求",
 };
 
@@ -3971,7 +3972,7 @@ function formatImpossibilityRejection(
 }
 
 const impossibilityFindingSchema = z.object({
-  category: z.enum(["nonexistent", "time", "budget", "contradiction"]),
+  category: z.enum(["nonexistent", "time", "contradiction"]),
   // One or two concrete sentences naming the facility / requirement /
   // amount / time involved, in the classification's own words (e.g.
   // 「スプラッシュ・マウンテンは東京ディズニーランドの施設で、
@@ -4039,7 +4040,7 @@ async function judgeImpossibility(
 // something without official information is rideable; when a
 // wheelchair user is among the participants, say plainly that the
 // app cannot handle it. This is NOT the §12.9 impossibility gate:
-// no cause classification (budget / time / existence /
+// no cause classification (time / existence /
 // contradiction) is attached, and the fixed guidance line
 // （最初は緩めの条件で…） is NOT appended — loosening the conditions
 // cannot make this buildable. After the refusal, the official
@@ -8157,9 +8158,11 @@ return spawnOutcome !== "exhausted";
 // Assignment for a reference-site list update: the user instructed the
 // AI chat to add / remove / re-search wait-time reference sites. The
 // task does the actual web work (search, open, evaluate) and writes the
-// resulting FULL list back through saveWaitTimeSources. Site names are
-// never fixed in code beyond the build-time initial registration — this
-// task is how the list stays current.
+// resulting FULL list back through saveWaitTimeSources. The list starts
+// from the bundled initial data (record CV: the candidate set registered
+// in the production app, shipped as data/wait-time-sources.json with its
+// seed and migration 0049 copies) — this task is how the list stays
+// current afterwards.
 function buildWaitSourcesAssignment(
 instruction: string,
 current: z.infer<typeof waitTimeSourceShape>[],
@@ -9893,8 +9896,12 @@ unknownReason: z.string().max(500).nullable().optional(),
 // task is not even told). The evidence that a task started is
 // its FIRST call to its attempt's own record action
 // (recordTaskAttempt). Deadlines are judged from the recorded
-// instants by checkTaskManager (run on a 1-minute schedule and
-// callable on demand):
+// instants by the manager's deadline check (runTaskMgrCheck).
+// The check is driven by ordinary action calls — getState runs
+// it whenever an attempt is past a deadline (record CW: the
+// piggyback drive, see mgrTickOnAction) — and the
+// checkTaskManager action also stays callable on demand. No
+// platform schedule needs to be configured for it:
 // - no first call within the kind's start timeout → the attempt
 //   is closed as cancelled and a new attempt is spawned (retry);
 // - started but not finished within the kind's total timeout →
@@ -10377,10 +10384,16 @@ async function advanceTaskMgrTest(ctx: Ctx, testId: number): Promise<void> {
   await spawnTaskMgrAttempt(ctx, run.id);
 }
 
-// The periodic deadline check: every open attempt — of a
-// running test AND of a production run — is judged from its
-// recorded instants alone. Run by the 1-minute schedule and
-// callable on demand.
+// The deadline check: every open attempt — of a running test
+// AND of a production run — is judged from its recorded
+// instants alone. Driven by ordinary action calls through
+// mgrTickOnAction (record CW) and by the checkTaskManager
+// action, which stays callable on demand. An attempt is closed
+// only through a claim update (conditional on the attempt
+// still being in an open status): when two drives judge the
+// same attempt at the same time, only the caller whose claim
+// actually closed it goes on to the retry / forced step, so
+// no attempt is ever closed, retried or forced twice.
 async function runTaskMgrCheck(
   ctx: Ctx,
 ): Promise<{ closedAttempts: number; retriedAttempts: number; forcedRuns: number }> {
@@ -10412,7 +10425,7 @@ async function runTaskMgrCheck(
       // judging deadlines against a finished target.
       const reconciled = await mgrReconcileProductionTarget(ctx, target);
       if (reconciled) {
-        await db
+        const claimed = await db
           .update(schema.taskMgrAttempts)
           .set({
             status: reconciled === "succeeded" ? "succeeded" : "cancelled",
@@ -10422,7 +10435,17 @@ async function runTaskMgrCheck(
                 ? "対象の処理は既に完了していたため、この試行を閉じた"
                 : "対象の処理は既に終了していたため、この試行を閉じた",
           })
-          .where(eq(schema.taskMgrAttempts.id, attempt.id));
+          .where(
+            and(
+              eq(schema.taskMgrAttempts.id, attempt.id),
+              inArray(schema.taskMgrAttempts.status, [
+                "awaiting_start",
+                "running",
+              ]),
+            ),
+          )
+          .returning({ id: schema.taskMgrAttempts.id });
+        if (claimed.length === 0) continue;
         await db
           .update(schema.taskMgrRuns)
           .set({
@@ -10450,10 +10473,20 @@ async function runTaskMgrCheck(
         reason = `全体の制限時間（${totalWindowSec}秒）内に終了しなかったためキャンセル`;
       }
       if (!reason) continue;
-      await db
+      const claimed = await db
         .update(schema.taskMgrAttempts)
         .set({ status: "cancelled", finishedAt: now, closeReason: reason })
-        .where(eq(schema.taskMgrAttempts.id, attempt.id));
+        .where(
+          and(
+            eq(schema.taskMgrAttempts.id, attempt.id),
+            inArray(schema.taskMgrAttempts.status, [
+              "awaiting_start",
+              "running",
+            ]),
+          ),
+        )
+        .returning({ id: schema.taskMgrAttempts.id });
+      if (claimed.length === 0) continue;
       closedAttempts += 1;
       const outcome = await mgrAfterAttemptClosed(ctx, run.id);
       if (outcome === "retried") retriedAttempts += 1;
@@ -10481,16 +10514,92 @@ async function runTaskMgrCheck(
       reason = `全体の制限時間（${totalWindowSec}秒）内に終了しなかったためキャンセル`;
     }
     if (!reason) continue;
-    await db
+    const claimed = await db
       .update(schema.taskMgrAttempts)
       .set({ status: "cancelled", finishedAt: now, closeReason: reason })
-      .where(eq(schema.taskMgrAttempts.id, attempt.id));
+      .where(
+        and(
+          eq(schema.taskMgrAttempts.id, attempt.id),
+          inArray(schema.taskMgrAttempts.status, [
+            "awaiting_start",
+            "running",
+          ]),
+        ),
+      )
+      .returning({ id: schema.taskMgrAttempts.id });
+    if (claimed.length === 0) continue;
     closedAttempts += 1;
     const outcome = await afterTaskMgrAttemptClosed(ctx, run.id);
     if (outcome === "retried") retriedAttempts += 1;
     if (outcome === "forced") forcedRuns += 1;
   }
   return { closedAttempts, retriedAttempts, forcedRuns };
+}
+
+// ---------- Task manager: piggyback drive (record CW) ----------
+//
+// The deadline check used to run only from a platform schedule
+// (a 1-minute scheduled call of checkTaskManager). A
+// distribution copy cannot carry that space setting, so the
+// check now rides on ordinary action calls instead: getState —
+// which the client calls on every state read and polls every
+// few seconds while anything is in flight — runs this tick
+// FIRST, before it reads any state, so a retry the tick spawns
+// or a forced end it applies is already reflected in the state
+// that very call returns. No schedule needs to be configured
+// at build time. Where a schedule still exists (the home
+// space keeps its own in this record) it calls the same check:
+// the claim updates in runTaskMgrCheck keep the two drives
+// from ever closing, retrying or forcing the same attempt
+// twice.
+//
+// The probe is deliberately cheap: one light query over the
+// open attempts' deadline columns, judged in memory with the
+// same conditions runTaskMgrCheck itself applies. When nothing
+// is past a deadline — the ordinary case, including when no
+// attempt is open at all — the tick returns at once: no writes,
+// no reconcile, no spawns. Ticks are also serialised within
+// this process: a call that arrives while a tick is running
+// waits for it and then probes again, so concurrent action
+// calls never run the full check side by side.
+let mgrTickInFlight: Promise<void> | null = null;
+
+async function mgrTickOnAction(ctx: Ctx): Promise<void> {
+  while (mgrTickInFlight) {
+    try {
+      await mgrTickInFlight;
+    } catch {
+      // That tick's failure is its own caller's to surface; this
+      // call still makes its own probe below.
+    }
+  }
+  const tick = (async (): Promise<void> => {
+    const db = ctx.db<typeof schema>();
+    const now = new Date();
+    const open = await db
+      .select({
+        status: schema.taskMgrAttempts.status,
+        startDeadlineAt: schema.taskMgrAttempts.startDeadlineAt,
+        totalDeadlineAt: schema.taskMgrAttempts.totalDeadlineAt,
+      })
+      .from(schema.taskMgrAttempts)
+      .where(
+        inArray(schema.taskMgrAttempts.status, ["awaiting_start", "running"]),
+      );
+    const due = open.some(
+      (a) =>
+        (a.status === "awaiting_start" && now > a.startDeadlineAt) ||
+        now > a.totalDeadlineAt,
+    );
+    if (!due) return;
+    await runTaskMgrCheck(ctx);
+  })();
+  mgrTickInFlight = tick;
+  try {
+    await tick;
+  } finally {
+    if (mgrTickInFlight === tick) mgrTickInFlight = null;
+  }
 }
 
 // ---------- Task manager: production core ----------
@@ -11667,6 +11776,525 @@ async function recordPromptUpdateCheck(
     });
 }
 
+
+// ---------- handover self-check (spec §24) ----------
+//
+// checkInitialState (in Actions, below) judges whether this copy
+// is in the §24 initial state and whether the §2.1 wiring state
+// is in place, and returns the judgement as data: one pass/fail
+// per check plus an overall pass/fail, with the reason on every
+// failed check. The check is READ-ONLY: it only reads the DB and
+// the in-code constants, it writes nothing, and it deliberately
+// does NOT run the task manager's deadline judgement (that
+// judgement closes and retries attempts — a side effect this
+// check must never have; the manager's reachability is judged
+// from its stored parameters and the absence of left-open runs
+// and attempts instead). The fixed tabs are app structure, not
+// DB state, so they are not part of this check (spec §24 states
+// the check's scope).
+
+type InitialStateCheck = { id: string; ok: boolean; detail: string };
+
+async function runInitialStateCheck(
+  id: string,
+  fn: () => Promise<{ ok: boolean; detail: string }>,
+): Promise<InitialStateCheck> {
+  try {
+    const r = await fn();
+    return { id, ok: r.ok, detail: r.detail };
+  } catch (e) {
+    return {
+      id,
+      ok: false,
+      detail: `check could not run: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
+}
+
+// The production tables the check requires to exist: every table
+// of the app except the development-only debug tables (which the
+// production variant does not create). [schema export, SQL name]
+const INITIAL_STATE_TABLES: [string, string][] = [
+  ["conditions", "conditions"],
+  ["announcement", "announcement"],
+  ["promptVersions", "prompt_versions"],
+  ["promptUpdateState", "prompt_update_state"],
+  ["messages", "messages"],
+  ["waitTimeSources", "wait_time_sources"],
+  ["waitTimeSourceRequests", "wait_time_source_requests"],
+  ["researchRequests", "research_requests"],
+  ["planSets", "plan_sets"],
+  ["verificationRequests", "verification_requests"],
+  ["plans", "plans"],
+  ["planItems", "plan_items"],
+  ["facilities", "facilities"],
+  ["sourceSnapshots", "source_snapshots"],
+  ["factBuilds", "fact_builds"],
+  ["normalizedFacts", "normalized_facts"],
+  ["restaurantFacts", "restaurant_facts"],
+  ["acquisitionPlans", "acquisition_plans"],
+  ["acquisitionPlanNodes", "acquisition_plan_nodes"],
+  ["acquisitionRestaurantLeaves", "acquisition_restaurant_leaves"],
+  ["areaTravelTimes", "area_travel_times"],
+  ["runLogs", "run_logs"],
+  ["runLogEvents", "run_log_events"],
+  ["taskMgrParams", "task_mgr_params"],
+  ["taskMgrTests", "task_mgr_tests"],
+  ["taskMgrRuns", "task_mgr_runs"],
+  ["taskMgrAttempts", "task_mgr_attempts"],
+  ["taskMgrCalls", "task_mgr_calls"],
+  ["mgrDialogNotices", "mgr_dialog_notices"],
+];
+
+function summarizeProblems(problems: string[]): string {
+  const head = problems.slice(0, 5).join("; ");
+  return problems.length > 5
+    ? `${head}; …and ${problems.length - 5} more`
+    : head;
+}
+
+async function collectInitialStateChecks(
+  ctx: Ctx,
+): Promise<InitialStateCheck[]> {
+  const db = ctx.db<typeof schema>();
+  const checks: InitialStateCheck[] = [];
+
+  checks.push(
+    await runInitialStateCheck("tablesExist", async () => {
+      const missing: string[] = [];
+      const byExport = schema as unknown as Record<string, unknown>;
+      for (const [exportName, sqlName] of INITIAL_STATE_TABLES) {
+        const table = byExport[exportName];
+        if (!table) {
+          missing.push(sqlName);
+          continue;
+        }
+        try {
+          // Existence probe only: the query must merely succeed.
+          await db
+            .select()
+            .from(table as never)
+            .limit(1);
+        } catch {
+          missing.push(sqlName);
+        }
+      }
+      return missing.length === 0
+        ? {
+            ok: true,
+            detail: `all ${INITIAL_STATE_TABLES.length} production tables exist`,
+          }
+        : { ok: false, detail: `missing tables: ${missing.join(", ")}` };
+    }),
+  );
+
+  checks.push(
+    await runInitialStateCheck("messagesEmpty", async () => {
+      const rows = await db
+        .select({ id: schema.messages.id })
+        .from(schema.messages);
+      return rows.length === 0
+        ? { ok: true, detail: "messages: 0 rows" }
+        : {
+            ok: false,
+            detail: `messages: ${rows.length} rows (expected 0)`,
+          };
+    }),
+  );
+
+  checks.push(
+    await runInitialStateCheck("conditionsUnsaved", async () => {
+      const rows = await db
+        .select({ id: schema.conditions.id })
+        .from(schema.conditions);
+      return rows.length === 0
+        ? { ok: true, detail: "conditions: 0 rows (not saved)" }
+        : {
+            ok: false,
+            detail: `conditions: ${rows.length} rows (expected 0 — conditions saved)`,
+          };
+    }),
+  );
+
+  checks.push(
+    await runInitialStateCheck("planSetsEmpty", async () => {
+      const sets = await db
+        .select({ id: schema.planSets.id })
+        .from(schema.planSets);
+      const plans = await db
+        .select({ id: schema.plans.id })
+        .from(schema.plans);
+      const items = await db
+        .select({ id: schema.planItems.id })
+        .from(schema.planItems);
+      const ok =
+        sets.length === 0 && plans.length === 0 && items.length === 0;
+      return {
+        ok,
+        detail: `plan_sets: ${sets.length}, plans: ${plans.length}, plan_items: ${items.length} (expected all 0)`,
+      };
+    }),
+  );
+
+  checks.push(
+    await runInitialStateCheck("facilitiesSeed", async () => {
+      const rows = await db.select().from(schema.facilities);
+      const problems: string[] = [];
+      if (rows.length !== FACILITY_SEED.length) {
+        problems.push(
+          `count ${rows.length} (expected ${FACILITY_SEED.length})`,
+        );
+      }
+      const byKey = new Map(
+        rows.map((r) => [`${r.park}:${r.nameKey}`, r] as const),
+      );
+      if (byKey.size !== rows.length) {
+        problems.push("duplicate park + name_key rows present");
+      }
+      let urlCount = 0;
+      let durationCount = 0;
+      let staticCount = 0;
+      let photoCount = 0;
+      for (const r of rows) {
+        if (r.officialUrl) urlCount += 1;
+        if (r.durationMin != null) durationCount += 1;
+        if (r.staticFetchedAt) staticCount += 1;
+        if (r.imageBlobKey) photoCount += 1;
+      }
+      for (const f of FACILITY_SEED) {
+        const r = byKey.get(`${f.park}:${f.nameKey}`);
+        if (!r) {
+          problems.push(`missing row: ${f.park}/${f.name}`);
+          continue;
+        }
+        if (r.name !== f.name) {
+          problems.push(`name differs: ${f.park}/${f.nameKey}`);
+        }
+        if (r.area !== f.area) {
+          problems.push(`area differs: ${f.park}/${f.name}`);
+        }
+        if (r.lat !== f.lat || r.lng !== f.lng) {
+          problems.push(`coordinates differ: ${f.park}/${f.name}`);
+        }
+        if ((r.officialUrl ?? null) !== (f.officialUrl ?? null)) {
+          problems.push(`officialUrl differs: ${f.park}/${f.name}`);
+        }
+        if ((r.durationMin ?? null) !== (f.durationMin ?? null)) {
+          problems.push(`durationMin differs: ${f.park}/${f.name}`);
+        }
+        if ((r.coordsFetchedAt?.getTime() ?? null) !== FACILITY_SEED_STAMP_MS) {
+          problems.push(`coords stamp differs: ${f.park}/${f.name}`);
+        }
+        if (
+          (r.staticFetchedAt?.getTime() ?? null) !==
+          (f.staticFetched ? FACILITY_SEED_STAMP_MS : null)
+        ) {
+          problems.push(`static-group stamp differs: ${f.park}/${f.name}`);
+        }
+        if (r.imageBlobKey != null) {
+          problems.push(`photo present (photos are not bundled): ${f.park}/${f.name}`);
+        }
+      }
+      return problems.length === 0
+        ? {
+            ok: true,
+            detail: `facilities: ${rows.length} rows, every row equal to the bundled seed (officialUrl on ${urlCount}, durationMin on ${durationCount}, static group fetched on ${staticCount}, photos ${photoCount})`,
+          }
+        : { ok: false, detail: `facilities: ${summarizeProblems(problems)}` };
+    }),
+  );
+
+  checks.push(
+    await runInitialStateCheck("waitTimeSourcesSeed", async () => {
+      const rows = await db.select().from(schema.waitTimeSources);
+      const problems: string[] = [];
+      if (rows.length !== WAIT_TIME_SEED.length) {
+        problems.push(
+          `count ${rows.length} (expected ${WAIT_TIME_SEED.length})`,
+        );
+      }
+      const byUrl = new Map(rows.map((r) => [r.url, r] as const));
+      if (byUrl.size !== rows.length) {
+        problems.push("duplicate url rows present");
+      }
+      for (const s of WAIT_TIME_SEED) {
+        const r = byUrl.get(s.url);
+        if (!r) {
+          problems.push(`missing row: ${s.name}`);
+          continue;
+        }
+        if (r.name !== s.name) problems.push(`name differs: ${s.name}`);
+        if (r.park !== s.park) problems.push(`park differs: ${s.name}`);
+        if ((r.provides ?? null) !== (s.provides ?? null)) {
+          problems.push(`provides differs: ${s.name}`);
+        }
+        if ((r.fetchMethod ?? null) !== (s.fetchMethod ?? null)) {
+          // One documented allowance: migration 0018 (the original
+          // registration, already-applied history in the home app)
+          // registered two of these rows with fetchMethod "script",
+          // and migration 0049 inserts only rows whose URL is not
+          // registered yet, so a migration-built DB keeps 0018's
+          // value for them, while the bundled seed carries the
+          // production DB's later value ("browser" — see the
+          // provenance of data/wait-time-sources.json). Both are
+          // registrations of the same initial rows; the allowance
+          // is keyed on 0018's registration timestamps in the seed
+          // itself (no site is named here). Any other fetchMethod
+          // difference is a failure.
+          const is0018Registration =
+            (s.fetchMethod ?? null) === "browser" &&
+            (r.fetchMethod ?? null) === "script" &&
+            s.lastCheckedAtMs === 1794495600000 &&
+            s.createdAtMs === 1794495600000;
+          if (!is0018Registration) {
+            problems.push(`fetchMethod differs: ${s.name}`);
+          }
+        }
+        if ((r.lastCheckedAt?.getTime() ?? null) !== s.lastCheckedAtMs) {
+          problems.push(`lastCheckedAt differs: ${s.name}`);
+        }
+        if ((r.createdAt?.getTime() ?? null) !== s.createdAtMs) {
+          problems.push(`createdAt differs: ${s.name}`);
+        }
+      }
+      return problems.length === 0
+        ? {
+            ok: true,
+            detail: `wait_time_sources: ${rows.length} rows, every row equal to the bundled seed`,
+          }
+        : {
+            ok: false,
+            detail: `wait_time_sources: ${summarizeProblems(problems)}`,
+          };
+    }),
+  );
+
+  checks.push(
+    await runInitialStateCheck("areaTravelTimesSeed", async () => {
+      const rows = await db.select().from(schema.areaTravelTimes);
+      const problems: string[] = [];
+      if (rows.length !== TRAVEL_TIME_SEED.length) {
+        problems.push(
+          `count ${rows.length} (expected ${TRAVEL_TIME_SEED.length})`,
+        );
+      }
+      const byPair = new Map(
+        rows.map(
+          (r) => [`${r.park}:${r.areaAKey}:${r.areaBKey}`, r] as const,
+        ),
+      );
+      if (byPair.size !== rows.length) {
+        problems.push("duplicate park + area-pair rows present");
+      }
+      for (const s of TRAVEL_TIME_SEED) {
+        const r = byPair.get(`${s.park}:${s.areaAKey}:${s.areaBKey}`);
+        if (!r) {
+          problems.push(`missing row: ${s.park}/${s.areaA} - ${s.areaB}`);
+          continue;
+        }
+        if (r.areaA !== s.areaA || r.areaB !== s.areaB) {
+          problems.push(`area names differ: ${s.park}/${s.areaA} - ${s.areaB}`);
+        }
+        if (r.minutes !== s.minutes) {
+          problems.push(`minutes differ: ${s.park}/${s.areaA} - ${s.areaB}`);
+        }
+        if ((r.sourceTitle ?? null) !== s.sourceTitle) {
+          problems.push(`sourceTitle differs: ${s.park}/${s.areaA} - ${s.areaB}`);
+        }
+        if ((r.sourceUrl ?? null) !== s.sourceUrl) {
+          problems.push(`sourceUrl differs: ${s.park}/${s.areaA} - ${s.areaB}`);
+        }
+        if ((r.fetchedAt ?? null) !== s.fetchedAt) {
+          problems.push(`fetchedAt differs: ${s.park}/${s.areaA} - ${s.areaB}`);
+        }
+        if ((r.createdAt?.getTime() ?? null) !== s.createdAtMs) {
+          problems.push(`createdAt differs: ${s.park}/${s.areaA} - ${s.areaB}`);
+        }
+        if ((r.updatedAt?.getTime() ?? null) !== s.updatedAtMs) {
+          problems.push(`updatedAt differs: ${s.park}/${s.areaA} - ${s.areaB}`);
+        }
+      }
+      return problems.length === 0
+        ? {
+            ok: true,
+            detail: `area_travel_times: ${rows.length} rows, every row equal to the bundled seed`,
+          }
+        : {
+            ok: false,
+            detail: `area_travel_times: ${summarizeProblems(problems)}`,
+          };
+    }),
+  );
+
+  checks.push(
+    await runInitialStateCheck("sourceLayerEmpty", async () => {
+      const snapshots = await db
+        .select({ id: schema.sourceSnapshots.id })
+        .from(schema.sourceSnapshots);
+      const facts = await db
+        .select({ id: schema.normalizedFacts.id })
+        .from(schema.normalizedFacts);
+      const builds = await db
+        .select({ id: schema.factBuilds.id })
+        .from(schema.factBuilds);
+      const restaurant = await db
+        .select({ id: schema.restaurantFacts.id })
+        .from(schema.restaurantFacts);
+      const research = await db
+        .select({ id: schema.researchRequests.id })
+        .from(schema.researchRequests);
+      const ok =
+        snapshots.length === 0 &&
+        facts.length === 0 &&
+        builds.length === 0 &&
+        restaurant.length === 0 &&
+        research.length === 0;
+      return {
+        ok,
+        detail: `source_snapshots: ${snapshots.length}, normalized_facts: ${facts.length}, fact_builds: ${builds.length}, restaurant_facts: ${restaurant.length}, research_requests: ${research.length} (expected all 0)`,
+      };
+    }),
+  );
+
+  checks.push(
+    await runInitialStateCheck("announcementState", async () => {
+      const rows = await db
+        .select({ id: schema.announcement.id })
+        .from(schema.announcement);
+      if (rows.length === 0) {
+        return { ok: true, detail: "announcement: no row (not fetched yet)" };
+      }
+      if (rows.length === 1 && rows[0]!.id === 1) {
+        return {
+          ok: true,
+          detail:
+            "announcement: the single saved row (distribution-channel state, kept across reset)",
+        };
+      }
+      return {
+        ok: false,
+        detail: `announcement: ${rows.length} rows (expected 0, or the single saved row)`,
+      };
+    }),
+  );
+
+  checks.push(
+    await runInitialStateCheck("promptsBundledOnly", async () => {
+      const rows = await db
+        .select({ ver: schema.promptVersions.ver })
+        .from(schema.promptVersions);
+      await refreshPromptBundles(ctx);
+      const applied = activeBundle().ver;
+      const problems: string[] = [];
+      if (rows.length !== 0) {
+        problems.push(
+          `prompt_versions: ${rows.length} rows (expected 0 — a stored update is applied or kept)`,
+        );
+      }
+      if (applied !== BUNDLED_PROMPTS_VER) {
+        problems.push(
+          `applied prompt ver ${applied} (expected the bundled ver ${BUNDLED_PROMPTS_VER})`,
+        );
+      }
+      return problems.length === 0
+        ? {
+            ok: true,
+            detail: `prompts: applied ver ${applied} = bundled ver ${BUNDLED_PROMPTS_VER}, prompt_versions 0 rows, the applied bundle loads`,
+          }
+        : { ok: false, detail: `prompts: ${problems.join("; ")}` };
+    }),
+  );
+
+  checks.push(
+    await runInitialStateCheck("constantsSet", async () => {
+      const problems: string[] = [];
+      if (SHARE_NOTE_URL !== null) {
+        problems.push("SHARE_NOTE_URL is set (expected unset / null)");
+      }
+      if (
+        ANNOUNCE_URL !==
+        "https://raw.githubusercontent.com/hiroragi2034/disney-plan-app-spec/main/announce.json"
+      ) {
+        problems.push("ANNOUNCE_URL differs from the fixed §22.1 URL");
+      }
+      if (
+        PROMPTS_MANIFEST_URL !==
+        "https://raw.githubusercontent.com/hiroragi2034/disney-plan-app-spec/main/prompts-manifest.json"
+      ) {
+        problems.push("PROMPTS_MANIFEST_URL differs from the fixed §22.3 URL");
+      }
+      if (
+        PROMPTS_URL !==
+        "https://raw.githubusercontent.com/hiroragi2034/disney-plan-app-spec/main/prompts.json"
+      ) {
+        problems.push("PROMPTS_URL differs from the fixed §22.3 URL");
+      }
+      return problems.length === 0
+        ? {
+            ok: true,
+            detail:
+              "constants: SHARE_NOTE_URL is unset (null); ANNOUNCE_URL and the prompt-update URLs hold the fixed distribution URLs (§22.1 / §22.3)",
+          }
+        : { ok: false, detail: `constants: ${problems.join("; ")}` };
+    }),
+  );
+
+  checks.push(
+    await runInitialStateCheck("taskManagerReady", async () => {
+      const problems: string[] = [];
+      const params = await db.select().from(schema.taskMgrParams);
+      for (const def of TASK_MGR_PROD_KINDS) {
+        const row = params.find((p) => p.kind === def.kind);
+        if (!row) {
+          problems.push(`params missing for kind ${def.kind} (${def.label})`);
+          continue;
+        }
+        if (
+          row.startTimeoutSec !== def.startTimeoutSec ||
+          row.totalTimeoutSec !== def.totalTimeoutSec ||
+          row.maxAttempts !== def.maxAttempts
+        ) {
+          problems.push(
+            `params differ for kind ${def.kind} (${def.label}): ${row.startTimeoutSec}/${row.totalTimeoutSec}/${row.maxAttempts} (expected ${def.startTimeoutSec}/${def.totalTimeoutSec}/${def.maxAttempts})`,
+          );
+        }
+      }
+      const openRuns = await db
+        .select({ id: schema.taskMgrRuns.id })
+        .from(schema.taskMgrRuns)
+        .where(eq(schema.taskMgrRuns.status, "running"));
+      if (openRuns.length !== 0) {
+        problems.push(
+          `task_mgr_runs: ${openRuns.length} runs still running (a run's final state is only succeeded or forced)`,
+        );
+      }
+      const openAttempts = await db
+        .select({ id: schema.taskMgrAttempts.id })
+        .from(schema.taskMgrAttempts)
+        .where(
+          inArray(schema.taskMgrAttempts.status, [
+            "awaiting_start",
+            "running",
+          ]),
+        );
+      if (openAttempts.length !== 0) {
+        problems.push(
+          `task_mgr_attempts: ${openAttempts.length} attempts still open`,
+        );
+      }
+      return problems.length === 0
+        ? {
+            ok: true,
+            detail:
+              "task manager: production params for kinds 11-17 hold the §2.1 initial values, no run is left running and no attempt is open (the deadline judgement rides on getState; this check reads the stored state and never runs that judgement)",
+          }
+        : { ok: false, detail: `task manager: ${summarizeProblems(problems)}` };
+    }),
+  );
+
+  return checks;
+}
+
 export const Actions = {
 getState: defineAction({
 description:
@@ -11675,10 +12303,27 @@ request: z.object({}),
 response: stateResponse,
 async handler(ctx): Promise<z.infer<typeof stateResponse>> {
 const db = ctx.db<typeof schema>();
+// Task manager piggyback drive (record CW): judge deadlines
+// BEFORE anything is read, so a retry this tick spawns or a
+// forced end it applies is already reflected in the state this
+// call returns — and so the manager-managed snapshot and the
+// stale guards below see the post-tick state (a run the tick
+// just forced is closed, with its target already marked by the
+// manager's own surfacing, so the guards do not report it a
+// second time). A failed tick must not take the state read
+// down with it: the attempts stay open in the DB and the next
+// action call probes again. (checkTaskManager, called
+// directly, still surfaces the same failure to its caller.)
+try {
+await mgrTickOnAction(ctx);
+} catch {
+// The next action call probes again (see the note above).
+}
 const conditions = await loadConditions(ctx);
 
 // 裏タスク管理： targets with a live manager run are governed
-// by the manager's own deadlines (its 1-minute check), NOT by
+// by the manager's own deadlines (its piggyback deadline
+// check on action calls, above), NOT by
 // the stale-window guards below — the manager's total timeout
 // for plan creation (2400s) is longer than the generation
 // stale window, and a guard firing first would fail a target
@@ -20197,7 +20842,7 @@ return { ok: true};
 
 reportImpossibleRequest: defineAction({
 description:
-"Internal: called by a generation / partial-replacement task when, with the fetched materials in hand (official facility list, the target date's operations/closures, the normalized facts), the request clearly hits one of the FIXED impossibility patterns (spec §6.2.1: nonexistent / time / budget / contradiction), or when drafting makes it clear the requirements cannot all hold (§6.5). No plan is saved: a whole-set run is failed like reportPlanFailure, a partial replacement stands its slot down like reportPlanReplacementFailure, and the chat receives the fixed §12.9 rejection (apology + cause classification with concrete names + the fixed guidance line; counterfactual promises are dropped sentence-wise and suggestion-form prescriptions clause-wise server-side, so the reason stops at stating objective fact). This is the honest exit for an impossible request — never save a skeleton plan instead.",
+"Internal: called by a generation / partial-replacement task when, with the fetched materials in hand (official facility list, the target date's operations/closures, the normalized facts), the request clearly hits one of the FIXED impossibility patterns (spec §6.2.1: nonexistent / time / contradiction), or when drafting makes it clear the requirements cannot all hold (§6.5). No plan is saved: a whole-set run is failed like reportPlanFailure, a partial replacement stands its slot down like reportPlanReplacementFailure, and the chat receives the fixed §12.9 rejection (apology + cause classification with concrete names + the fixed guidance line; counterfactual promises are dropped sentence-wise and suggestion-form prescriptions clause-wise server-side, so the reason stops at stating objective fact). This is the honest exit for an impossible request — never save a skeleton plan instead.",
 request: z.object({
 planSetId: z.number(),
 // Set only for a partial replacement: the slot being replaced.
@@ -20952,7 +21597,7 @@ return { ok: true};
 
 resetUserData: defineAction({
 description:
-"Deletes ALL user data and returns the app to its initial state (spec §24): the AI chat log (messages), the プラン作成 conditions row, every plan set with its plans and schedule items, the facility dictionary (restored to the §24 seed: the 75 verified coordinate entries of data/facility-coordinates.json, all other static attributes empty), the area travel-time matrix, the normalized-source layer (source snapshots, normalized facts, fact builds, restaurant facts), research requests, and the pending-request trackers tied to deleted data (verification requests, wait-time-source update requests). What stays: the four fixed tabs (they are app structure, not data), the wait-time reference sites registered by the build-time survey (wait_time_sources rows), the saved announcement (announcement — distribution-channel state that doubles as the read record, spec §22.1), and the app constants (e.g. SHARE_NOTE_URL, ANNOUNCE_URL). Photo blobs belonging to deleted rows are left unreferenced in blob storage; nothing reads them once their rows are gone.",
+"Deletes ALL user data and returns the app to its initial state (spec §24): the AI chat log (messages), the プラン作成 conditions row, every plan set with its plans and schedule items, the facility dictionary (restored to the §24 seed: the 75 verified entries of data/facility-coordinates.json, coordinates plus the bundled static attributes — officialUrl on 58 entries, durationMin on 28, the static group marked fetched on 71; photos are not bundled), the area travel-time matrix (restored to the §24 seed: the 22 entries of data/area-travel-times.json, the initial values migration 0020 registered, each with its guide source — record CY; rows accumulated in use are reverted), the normalized-source layer (source snapshots, normalized facts, fact builds, restaurant facts), research requests, and the pending-request trackers tied to deleted data (verification requests, wait-time-source update requests), and the wait-time reference list (wait_time_sources, restored to the bundled §11 seed: the candidate set registered in the production app — record CV; rows added or removed in use are reverted). What stays: the four fixed tabs (they are app structure, not data), the saved announcement (announcement — distribution-channel state that doubles as the read record, spec §22.1), and the app constants (e.g. SHARE_NOTE_URL, ANNOUNCE_URL). Photo blobs belonging to deleted rows are left unreferenced in blob storage; nothing reads them once their rows are gone.",
 request: z.object({}),
 response: z.object({ ok: z.literal(true) }),
 async handler(ctx): Promise<{ ok: true }> {
@@ -20973,8 +21618,11 @@ await db.delete(schema.factBuilds);
 await db.delete(schema.sourceSnapshots);
 await db.delete(schema.facilities);
 // §24 initial state: the dictionary is not empty after a reset —
-// it holds exactly the distributed coordinate seed (75 entries),
-// with every other static attribute unset.
+// it holds exactly the distributed seed (75 entries): coordinates
+// plus the bundled static attributes (record CU). Entries whose
+// static attribute group was fetched in production carry
+// staticFetchedAt = the seed stamp; the rest keep it null and are
+// filled by the runtime fetch for missing attributes only.
 const seedStamp = new Date(FACILITY_SEED_STAMP_MS);
 await db.insert(schema.facilities).values(
 FACILITY_SEED.map((f) => ({
@@ -20982,21 +21630,86 @@ park: f.park,
 nameKey: f.nameKey,
 name: f.name,
 area: f.area,
+officialUrl: f.officialUrl ?? null,
+durationMin: f.durationMin ?? null,
 lat: f.lat,
 lng: f.lng,
 coordsFetchedAt: seedStamp,
+staticFetchedAt: f.staticFetched ? seedStamp : null,
 createdAt: seedStamp,
 updatedAt: seedStamp,
 })),
 );
 await db.delete(schema.areaTravelTimes);
+// §24 initial state: the travel matrix is not empty after a
+// reset either — it returns to exactly the bundled seed
+// (record CY: the initial values migration 0020 registered,
+// data/area-travel-times.json). Rows accumulated in use are
+// removed and rows it deleted come back, each with its
+// migration-0020 source and timestamps.
+await db.insert(schema.areaTravelTimes).values(
+TRAVEL_TIME_SEED.map((s) => ({
+park: s.park,
+areaA: s.areaA,
+areaB: s.areaB,
+areaAKey: s.areaAKey,
+areaBKey: s.areaBKey,
+minutes: s.minutes,
+sourceTitle: s.sourceTitle,
+sourceUrl: s.sourceUrl,
+fetchedAt: s.fetchedAt,
+createdAt: new Date(s.createdAtMs),
+updatedAt: new Date(s.updatedAtMs),
+})),
+);
 await db.delete(schema.researchRequests);
+// §24 initial state: the wait-time reference list is not kept
+// as-is either — it returns to exactly the bundled seed
+// (record CV: the candidate set registered in the production
+// app, data/wait-time-sources.json). Rows the in-use
+// management added are removed and rows it deleted come back,
+// each with its production last-checked / created timestamps.
+await db.delete(schema.waitTimeSources);
+await db.insert(schema.waitTimeSources).values(
+WAIT_TIME_SEED.map((s) => ({
+name: s.name,
+url: s.url,
+park: s.park,
+provides: s.provides ?? null,
+fetchMethod: s.fetchMethod ?? null,
+lastCheckedAt: new Date(s.lastCheckedAtMs),
+createdAt: new Date(s.createdAtMs),
+})),
+);
 await db.delete(schema.waitTimeSourceRequests);
 await db.delete(schema.mgrDialogNotices);
 await db.delete(schema.messages);
 await db.delete(schema.conditions);
 ctx.invalidateQueries();
 return { ok: true };
+},
+}),
+
+checkInitialState: defineAction({
+description:
+"Read-only handover self-check (spec §24): judges whether this copy is in the §24 initial state and whether the §2.1 task-manager wiring state is in place, and returns the judgement as data — one {id, ok, detail} per check plus the overall ok (true only when every check passes; a failed check's detail states the reason). Checks: the production tables exist; messages, conditions and plan sets are empty; the facility dictionary, the wait-time reference list and the area travel-time matrix each equal their bundled seed (row counts and every field, including the dictionary's bundled static attributes and the absence of photos; for the reference list's fetchMethod, migration 0018's original registration value is also accepted — it registered two of the rows before the seed existed, and the seed carries the production DB's later value); the normalized-source layer and research requests are empty; the announcement holds no row or the single saved row; the prompts are the bundled version only (no stored update) and the applied bundle loads; the app constants hold their spec values (SHARE_NOTE_URL unset, the fixed announcement / prompt-update URLs); and the task manager's production parameters hold the §2.1 initial values with no run or attempt left open. The check writes nothing, fetches nothing, and never runs the task manager's deadline judgement (no piggyback drive — closing or retrying an attempt would be a side effect). The fixed tabs are app structure, not DB state, and are not part of this check.",
+request: z.object({}),
+response: z.object({
+ok: z.boolean(),
+checks: z.array(
+z.object({
+id: z.string(),
+ok: z.boolean(),
+detail: z.string(),
+}),
+),
+}),
+async handler(ctx): Promise<{
+ok: boolean;
+checks: InitialStateCheck[];
+}> {
+const checks = await collectInitialStateChecks(ctx);
+return { ok: checks.every((c) => c.ok), checks };
 },
 }),
 
@@ -21465,7 +22178,7 @@ return { ok: true };
 
 checkTaskManager: defineAction({
 description:
-"Task manager （裏タスク管理）: the periodic server-side deadline check. Judges every open attempt — the manager test's and the production processings' (plan creation, same-day search, research, bulk verification, wait-time site list update, image fetch, restaurant fact correction) — from its recorded instants alone: no first record call within the kind's start timeout, or no finish within its total timeout, closes the attempt as cancelled and retries on the same target; attempts exhausted closes the run as forced （試行回数を超えたので強制終了） and surfaces the failure (plan tab for plan creation / same-day search, chat for research / verification, dialog for the site list update / image fetch / restaurant correction). Runs on a 1-minute schedule; also callable on demand.",
+"Task manager （裏タスク管理）: the server-side deadline check. Judges every open attempt — the manager test's and the production processings' (plan creation, same-day search, research, bulk verification, wait-time site list update, image fetch, restaurant fact correction) — from its recorded instants alone: no first record call within the kind's start timeout, or no finish within its total timeout, closes the attempt as cancelled and retries on the same target; attempts exhausted closes the run as forced （試行回数を超えたので強制終了） and surfaces the failure (plan tab for plan creation / same-day search, chat for research / verification, dialog for the site list update / image fetch / restaurant correction). The same check also rides on ordinary action calls (getState runs it whenever an attempt is past a deadline — record CW), so no platform schedule needs to be configured; this action stays callable on demand.",
 request: z.object({}),
 response: z.object({
 ok: z.literal(true),

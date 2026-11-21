@@ -1,0 +1,97 @@
+{
+ "provenance": "Wait-time reference site candidates bundled as initial data for the distribution, v1 (record CV, 2026-11-21). The set is the candidate list registered in the production app: every entry was copied verbatim from one row of the production app's wait_time_sources table (saved production DB, opened read-only), and each entry's source names that production row's id, so every bundled value (name, URL, park, what can be read, fetch method, last-checked and created timestamps) is traceable to its source row. A copy starts with exactly these rows registered (migration 0049 at build time; the seed in server/src/wait_time_seed.ts on reset); no build-time survey is performed. Site names and URLs live only in this data file and its mechanical copies (the seed and migration 0049), never in the spec body. The fetch methods are the production DB's recorded values (all six rows: browser); where migration 0018's file text says script for two of the rows, the production DB's value was bundled, because the DB is the live registration. No value in this file comes from AI memory and no site was re-checked live for this bundling: lastCheckedAt / createdAt are the production rows' own timestamps, preserved as-is.",
+ "exported_at": "2026-11-21",
+ "version": "v1 (record CV)",
+ "counts": {
+  "total": 6,
+  "byPark": {
+   "land": 1,
+   "sea": 3,
+   "both": 2
+  },
+  "byFetchMethod": {
+   "browser": 6
+  },
+  "note": "Counts over the bundled candidate set (the full production wait_time_sources table at extraction)."
+ },
+ "sources": [
+  {
+   "name": "urtrip（ランド）",
+   "url": "https://urtrip.jp/tdl-attraction-waitingtime-data/",
+   "park": "land",
+   "provides": "アトラクション別の過去データ分析：平均・最大・最小の待ち時間と、日ごとの平均待ち時間の推移",
+   "fetchMethod": "browser",
+   "lastCheckedAt": 1794456015035,
+   "createdAt": 1794456015036,
+   "source": {
+    "productionId": 1,
+    "source": "production app wait_time_sources row (saved production DB, opened read-only)"
+   }
+  },
+  {
+   "name": "urtrip（シー）",
+   "url": "https://urtrip.jp/tds-attraction-waitingtime-data/",
+   "park": "sea",
+   "provides": "アトラクション別の過去データ分析：平均・最大・最小の待ち時間と、日ごとの平均待ち時間の推移",
+   "fetchMethod": "browser",
+   "lastCheckedAt": 1794456015035,
+   "createdAt": 1794456015074,
+   "source": {
+    "productionId": 2,
+    "source": "production app wait_time_sources row (saved production DB, opened read-only)"
+   }
+  },
+  {
+   "name": "テマパ！",
+   "url": "https://www.temapa.jp/park/tdr/facility/258/",
+   "park": "both",
+   "provides": "施設ごとの現在の待ち時間と、平均・最大の待ち時間（リンク先は施設別ページの一例）",
+   "fetchMethod": "browser",
+   "lastCheckedAt": 1794456015035,
+   "createdAt": 1794456015095,
+   "source": {
+    "productionId": 3,
+    "source": "production app wait_time_sources row (saved production DB, opened read-only)"
+   }
+  },
+  {
+   "name": "disneyreal（ファンタジースプリングス）",
+   "url": "https://disneyreal.asumirai.info/guide/fantasysprings.html",
+   "park": "sea",
+   "provides": "ファンタジースプリングスの待ち時間統計：平均・中央値・最小・最大",
+   "fetchMethod": "browser",
+   "lastCheckedAt": 1794456015035,
+   "createdAt": 1794456015115,
+   "source": {
+    "productionId": 4,
+    "source": "production app wait_time_sources row (saved production DB, opened read-only)"
+   }
+  },
+  {
+   "name": "queue-times.com（シー）",
+   "url": "https://queue-times.com/parks/275/stats",
+   "park": "sea",
+   "provides": "掲示待ち時間のリアルタイム値と、パークごと・日ごとの履歴統計（全ライドの平均待ち時間／平均最大待ち時間）。全期間平均は現在の水準より低めに出るため、プラン作成時の推定には直近の期間の数字を使うこと。ランド版（parks/274）も同じサイトにある",
+   "fetchMethod": "browser",
+   "lastCheckedAt": 1794495600000,
+   "createdAt": 1794495600000,
+   "source": {
+    "productionId": 5,
+    "source": "production app wait_time_sources row (saved production DB, opened read-only)"
+   }
+  },
+  {
+   "name": "RopeDrop Planner",
+   "url": "https://ropedropplanner.com/ja/tdr/wait-times",
+   "park": "both",
+   "provides": "ランド・シー両パークの現在の待ち時間と30日平均。過去統計と天気予報などを組み合わせた予測寄りのサイト（公式ではない独立系）",
+   "fetchMethod": "browser",
+   "lastCheckedAt": 1794495600000,
+   "createdAt": 1794495600000,
+   "source": {
+    "productionId": 6,
+    "source": "production app wait_time_sources row (saved production DB, opened read-only)"
+   }
+  }
+ ]
+}

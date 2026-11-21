@@ -128,11 +128,15 @@ export const messages = sqliteTable("messages", {
 
 // Wait-time reference sites （待ち時間参考サイト）: third-party aggregate
 // sites that log the parks' posted wait times and publish typical levels
-// (averages / maxima / day-of-week patterns). Registered by Muse's own
-// survey — at build time and whenever the user instructs the AI chat to
-// add / remove / re-search — never edited by hand in the UI; the tab is
-// a display surface only. Plan generation consults these as ESTIMATION
-// material, kept strictly separate from official-site sources.
+// (averages / maxima / day-of-week patterns). The initial registration is
+// the bundled candidate set (record CV: the rows registered in the
+// production app, distributed as data/wait-time-sources.json; migration
+// 0049 inserts them at build time and resetUserData restores them from
+// wait_time_seed.ts) — no build-time survey is performed. Afterwards the
+// list changes only when the user instructs the AI chat to add / remove /
+// re-search — never edited by hand in the UI; the tab is a display surface
+// only. Plan generation consults these as ESTIMATION material, kept
+// strictly separate from official-site sources.
 export const waitTimeSources = sqliteTable("wait_time_sources", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   // Display name of the site / page.
@@ -612,9 +616,15 @@ export const planItems = sqliteTable("plan_items", {
   officialUrl: text("official_url"),
 });
 
-// Facility dictionary （施設辞書）: a runtime cache of STATIC facility
-// attributes, filled ONLY from data actually fetched at runtime
-// (generation / image-fetch tasks) — never bundled, never seeded.
+// Facility dictionary （施設辞書）: a store of STATIC facility
+// attributes. The initial state is seeded with the bundled seed
+// (facility_seed.ts / migration 0035, from data/facility-coordinates.json):
+// coordinates for all 75 entries plus the static attributes fetched
+// and accumulated in the production dictionary (record CU —
+// officialUrl / durationMin; photos are not bundled, as the
+// production store holds only owned-copy blob keys). Runtime fetches
+// (generation / image-fetch tasks) add new facilities and fill only
+// missing or expired attributes from there.
 // Keyed by park + normalized facility name. Only static attributes
 // live here; anything date-dependent (park hours, closures, show
 // times) is NEVER cached and is re-confirmed per target date, and
@@ -1097,12 +1107,14 @@ export const acquisitionRestaurantLeaves = sqliteTable(
 );
 
 // Area-to-area travel matrix （エリア間マトリクス）: typical walking
-// minutes between two areas of one park, accumulated at runtime from
-// web guide sources — the same "the user's own DB accumulates what
-// was actually fetched" pattern as the facility dictionary. Nothing
-// is bundled: rows appear only when a generation/research task (or
-// the build-time initial survey) actually read a source page and
-// recorded it here with its title, URL and fetch date.
+// minutes between two areas of one park. The initial state is the
+// bundled seed (record CY): the 22 source-backed rows migration
+// 0020 registered, distributed as data/area-travel-times.json and
+// carried by travel_time_seed.ts / migration 0050; resetUserData
+// restores exactly those rows. Beyond the seed, rows accumulate at
+// runtime only when a generation/research task actually read a
+// source page and recorded it here with its title, URL and fetch
+// date.
 //
 // `minutes` is stated at the AREA_MATRIX baseline speed — 少しゆっくり
 // (70 m/min) — and converted to the set's walking speed at use time
@@ -1237,9 +1249,11 @@ export const runLogEvents = sqliteTable("run_log_events", {
 //
 // ALL state lives in these tables — spawn instant, attempt
 // number, deadlines, status — never in memory, so closing the app
-// or Muse itself loses nothing. A periodic server-side check
-// (checkTaskManager, run on a schedule) judges deadlines purely
-// from the recorded instants:
+// or Muse itself loses nothing. The server-side deadline
+// check (checkTaskManager's judgement, driven by ordinary
+// action calls — record CW — and callable on demand through
+// that action) judges deadlines purely from the recorded
+// instants:
 // - no first record call within startTimeoutSec of the spawn →
 //   the attempt is closed as cancelled and a new attempt starts;
 // - started but not finished within totalTimeoutSec of the spawn

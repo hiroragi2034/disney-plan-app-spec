@@ -1,0 +1,389 @@
+{
+ "provenance": "Area-to-area travel-time initial data bundled for the distribution, v1 (record CY, 2026-11-21). The set is exactly the initial values registered by migration 0020 (0020_register_area_travel_matrix_real_data): every entry was copied verbatim from one INSERT statement of that migration (park, area pair and its normalized keys, minutes at the 少しゆっくり 70 m/min baseline, source title, source URL, fetch date, and the migration's created/updated timestamps 1794495600000). A copy starts with exactly these rows registered (migration 0020 at build time, and migration 0050 as the seed migration in the same NOT EXISTS form as migrations 0035/0049; the seed in server/src/travel_time_seed.ts on reset). Rows accumulated at runtime in the production app beyond these 22 (30 rows in the saved production DB) are NOT bundled: they are runtime accumulation, not the defined initial values, exactly as the facility dictionary bundles its 75-entry seed rather than the production dictionary's accumulated rows. No value in this file comes from AI memory and no source was re-checked live for this bundling: fetchedAt / timestamps are migration 0020's own values, preserved as-is.",
+ "exported_at": "2026-11-21",
+ "version": "v1 (record CY)",
+ "counts": {
+  "total": 22,
+  "byPark": {
+   "sea": 17,
+   "land": 5
+  },
+  "note": "Counts over the bundled initial set (the full migration 0020 registration)."
+ },
+ "travelTimes": [
+  {
+   "park": "sea",
+   "areaA": "ポートディスカバリー",
+   "areaB": "メディテレーニアンハーバー",
+   "areaAKey": "ポートディスカバリー",
+   "areaBKey": "メディテレーニアンハーバー",
+   "minutes": 5,
+   "sourceTitle": "マゼランズからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=BMH0523",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "sea",
+   "areaA": "マーメイドラグーン",
+   "areaB": "メディテレーニアンハーバー",
+   "areaAKey": "マーメイドラグーン",
+   "areaBKey": "メディテレーニアンハーバー",
+   "minutes": 6,
+   "sourceTitle": "マゼランズからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=BMH0523",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "sea",
+   "areaA": "アラビアンコースト",
+   "areaB": "メディテレーニアンハーバー",
+   "areaAKey": "アラビアンコースト",
+   "areaBKey": "メディテレーニアンハーバー",
+   "minutes": 8,
+   "sourceTitle": "マゼランズからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=BMH0523",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "sea",
+   "areaA": "メディテレーニアンハーバー",
+   "areaB": "ロストリバーデルタ",
+   "areaAKey": "メディテレーニアンハーバー",
+   "areaBKey": "ロストリバーデルタ",
+   "minutes": 8,
+   "sourceTitle": "マゼランズからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=BMH0523",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "sea",
+   "areaA": "アメリカンウォーターフロント",
+   "areaB": "マーメイドラグーン",
+   "areaAKey": "アメリカンウォーターフロント",
+   "areaBKey": "マーメイドラグーン",
+   "minutes": 12,
+   "sourceTitle": "ビッグシティ・ヴィークルからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=BAW0103",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "sea",
+   "areaA": "アメリカンウォーターフロント",
+   "areaB": "ロストリバーデルタ",
+   "areaAKey": "アメリカンウォーターフロント",
+   "areaBKey": "ロストリバーデルタ",
+   "minutes": 12,
+   "sourceTitle": "ビッグシティ・ヴィークルからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=BAW0103",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "sea",
+   "areaA": "マーメイドラグーン",
+   "areaB": "ミステリアスアイランド",
+   "areaAKey": "マーメイドラグーン",
+   "areaBKey": "ミステリアスアイランド",
+   "minutes": 6,
+   "sourceTitle": "センター・オブ・ジ・アースからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=BMI0101",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "sea",
+   "areaA": "ポートディスカバリー",
+   "areaB": "ミステリアスアイランド",
+   "areaAKey": "ポートディスカバリー",
+   "areaBKey": "ミステリアスアイランド",
+   "minutes": 6,
+   "sourceTitle": "センター・オブ・ジ・アースからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=BMI0101",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "sea",
+   "areaA": "アラビアンコースト",
+   "areaB": "ミステリアスアイランド",
+   "areaAKey": "アラビアンコースト",
+   "areaBKey": "ミステリアスアイランド",
+   "minutes": 7,
+   "sourceTitle": "センター・オブ・ジ・アースからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=BMI0101",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "sea",
+   "areaA": "ミステリアスアイランド",
+   "areaB": "ロストリバーデルタ",
+   "areaAKey": "ミステリアスアイランド",
+   "areaBKey": "ロストリバーデルタ",
+   "minutes": 7,
+   "sourceTitle": "センター・オブ・ジ・アースからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=BMI0101",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "sea",
+   "areaA": "ポートディスカバリー",
+   "areaB": "ロストリバーデルタ",
+   "areaAKey": "ポートディスカバリー",
+   "areaBKey": "ロストリバーデルタ",
+   "minutes": 5,
+   "sourceTitle": "アクアトピアからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=BPD0102",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "sea",
+   "areaA": "アラビアンコースト",
+   "areaB": "ポートディスカバリー",
+   "areaAKey": "アラビアンコースト",
+   "areaBKey": "ポートディスカバリー",
+   "minutes": 8,
+   "sourceTitle": "アクアトピアからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=BPD0102",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "sea",
+   "areaA": "ポートディスカバリー",
+   "areaB": "マーメイドラグーン",
+   "areaAKey": "ポートディスカバリー",
+   "areaBKey": "マーメイドラグーン",
+   "minutes": 9,
+   "sourceTitle": "アクアトピアからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=BPD0102",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "sea",
+   "areaA": "アラビアンコースト",
+   "areaB": "ロストリバーデルタ",
+   "areaAKey": "アラビアンコースト",
+   "areaBKey": "ロストリバーデルタ",
+   "minutes": 3,
+   "sourceTitle": "インディ・ジョーンズ・アドベンチャーからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=BLD0101",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "sea",
+   "areaA": "マーメイドラグーン",
+   "areaB": "ロストリバーデルタ",
+   "areaAKey": "マーメイドラグーン",
+   "areaBKey": "ロストリバーデルタ",
+   "minutes": 5,
+   "sourceTitle": "インディ・ジョーンズ・アドベンチャーからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=BLD0101",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "sea",
+   "areaA": "アラビアンコースト",
+   "areaB": "マーメイドラグーン",
+   "areaAKey": "アラビアンコースト",
+   "areaBKey": "マーメイドラグーン",
+   "minutes": 6,
+   "sourceTitle": "シンドバッド・ストーリーブック・ヴォヤッジからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=BAC0102",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "sea",
+   "areaA": "アメリカンウォーターフロント",
+   "areaB": "ファンタジースプリングス",
+   "areaAKey": "アメリカンウォーターフロント",
+   "areaBKey": "ファンタジースプリングス",
+   "minutes": 21,
+   "sourceTitle": "東京ディズニーシーを「端から端まで」歩いたら……　かかった“驚きの時間”に「家から駅までとあまり変わらない……？」（1/2） | ディズニー ねとらぼ",
+   "sourceUrl": "https://nlab.itmedia.co.jp/cont/articles/3588963/amp/",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "land",
+   "areaA": "トゥモローランド",
+   "areaB": "ワールドバザール",
+   "areaAKey": "トゥモローランド",
+   "areaBKey": "ワールドバザール",
+   "minutes": 3,
+   "sourceTitle": "オムニバスからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=AWB0103",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "land",
+   "areaA": "アドベンチャーランド",
+   "areaB": "ワールドバザール",
+   "areaAKey": "アドベンチャーランド",
+   "areaBKey": "ワールドバザール",
+   "minutes": 2,
+   "sourceTitle": "オムニバスからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=AWB0103",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "land",
+   "areaA": "ウエスタンランド",
+   "areaB": "ワールドバザール",
+   "areaAKey": "ウエスタンランド",
+   "areaBKey": "ワールドバザール",
+   "minutes": 5,
+   "sourceTitle": "オムニバスからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=AWB0103",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "land",
+   "areaA": "ファンタジーランド",
+   "areaB": "ワールドバザール",
+   "areaAKey": "ファンタジーランド",
+   "areaBKey": "ワールドバザール",
+   "minutes": 4,
+   "sourceTitle": "オムニバスからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=AWB0103",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  },
+  {
+   "park": "land",
+   "areaA": "クリッターカントリー",
+   "areaB": "ワールドバザール",
+   "areaAKey": "クリッターカントリー",
+   "areaBKey": "ワールドバザール",
+   "minutes": 6,
+   "sourceTitle": "オムニバスからの移動時間、距離、歩数（ディズニー歩数）",
+   "sourceUrl": "https://disney.hosuu.jp/syosai_information.php?code=AWB0103",
+   "fetchedAt": "2026-11-13",
+   "createdAt": 1794495600000,
+   "updatedAt": 1794495600000,
+   "source": {
+    "migration": "0020_register_area_travel_matrix_real_data",
+    "source": "home-export drizzle/0020 INSERT statement (verbatim)"
+   }
+  }
+ ]
+}

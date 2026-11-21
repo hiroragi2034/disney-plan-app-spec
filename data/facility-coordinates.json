@@ -1,7 +1,7 @@
 {
- "provenance": "Facility and venue coordinates for the distribution, v2 (record BJ, 2026-11-18). Coverage is now the FULL known universe: all 71 real facilities of the 2026-11-18 census (Tokyo DisneySea 39, Tokyo Disneyland 32) plus 4 venue entries (theaters / performance spaces that host settled shows) — 75 entries in total. Every entry carries kind (facility = the place's own point; venue = the point of the venue where the entry is staged, or the venue itself; representative = the park's entrance-area representative point for parkwide/harbor programs, which have no fixed location — see area-points.json) and a per-entry provenance naming its traceable source. Sources: the original app's facility dictionary (getfacilitydictionary, exported 2026-11-18), cross-checked by the 2026-11-18 full census (§10 Nominatim rule; of the 48 facilities where both the dictionary and the rule held coordinates, 46 matched at 0 m — the 2 exceptions are parkwide entries whose dictionary value is the representative point), plus the record-BJ completion (Nominatim venue and bounded queries, OpenStreetMap features via Overpass, Wikidata coordinates P625 — all queries recorded in the author's verification files). No coordinate in this file comes from AI memory: every point is traceable to a named source. The two entries formerly marked \"provenance\": \"unverified\" (センター・オブ・ジ・アース, ダンス・ザ・グローブ！) were corroborated by traceable sources in record BJ and no longer carry the mark; no entry in this file is unverified. Scope: real facilities and their venues only, following the census universe; dictionary rows that are plan-item labels (entry/exit, purchases, rests, meals, movement) and test residue are excluded even when they carry coordinates.",
- "exported_at": "2026-11-18",
- "version": "v2 (record BJ)",
+ "provenance": "Facility and venue coordinates for the distribution, v2 (record BJ, 2026-11-18). Coverage is now the FULL known universe: all 71 real facilities of the 2026-11-18 census (Tokyo DisneySea 39, Tokyo Disneyland 32) plus 4 venue entries (theaters / performance spaces that host settled shows) — 75 entries in total. Every entry carries kind (facility = the place's own point; venue = the point of the venue where the entry is staged, or the venue itself; representative = the park's entrance-area representative point for parkwide/harbor programs, which have no fixed location — see area-points.json) and a per-entry provenance naming its traceable source. Sources: the original app's facility dictionary (getfacilitydictionary, exported 2026-11-18), cross-checked by the 2026-11-18 full census (§10 Nominatim rule; of the 48 facilities where both the dictionary and the rule held coordinates, 46 matched at 0 m — the 2 exceptions are parkwide entries whose dictionary value is the representative point), plus the record-BJ completion (Nominatim venue and bounded queries, OpenStreetMap features via Overpass, Wikidata coordinates P625 — all queries recorded in the author's verification files). No coordinate in this file comes from AI memory: every point is traceable to a named source. The two entries formerly marked \"provenance\": \"unverified\" (センター・オブ・ジ・アース, ダンス・ザ・グローブ！) were corroborated by traceable sources in record BJ and no longer carry the mark; no entry in this file is unverified. Scope: real facilities and their venues only, following the census universe; dictionary rows that are plan-item labels (entry/exit, purchases, rests, meals, movement) and test residue are excluded even when they carry coordinates. Static attributes (record CU, 2026-11-21): each entry may also carry officialUrl and durationMin, taken from the production app's facility dictionary (saved production DB, facilities table) for the row matched by park + name_key; staticSource names that production row (facility id and its static_fetched_at) so every bundled value is traceable to its source row. Coverage over the 75 entries: officialUrl 58, durationMin 28, static attribute group fetched in production 71; the 4 venue entries have no production dictionary row and carry no static values beyond area. Area was already bundled for all 75 entries (record BJ); the production area agrees on 70 of the 71 matched rows — the one disagreement (ジャンボリミッキー！レッツ・ダンス！: production トゥモローランド vs bundled アドベンチャーランド) keeps the bundled record-BJ area, with the production value preserved in the author's record-CU extraction record. Photos are NOT bundled: the production DB stores only an owned-copy blob key (unusable in a copy) and a source kind label, and no displayable photo URL exists in it, so no photo value is carried for any entry; a copy fetches photos at runtime from the bundled officialUrl pages. No bundled value comes from AI memory.",
+ "exported_at": "2026-11-21",
+ "version": "v3 (record CU)",
  "counts": {
   "sea": 39,
   "land": 32,
@@ -12,7 +12,15 @@
    "venue": 8,
    "representative": 12
   },
-  "note": "sea/land count the census-universe facilities per park; the 4 venue entries (2 per park) are counted separately and are included in total and by_kind."
+  "note": "sea/land count the census-universe facilities per park; the 4 venue entries (2 per park) are counted separately and are included in total and by_kind.",
+  "staticAttributes": {
+   "officialUrl": 58,
+   "durationMin": 28,
+   "staticGroupFetchedInProduction": 71,
+   "areaBundled": 75,
+   "photoUrl": 0,
+   "note": "Counts over the 75 entries. See provenance (record CU paragraph)."
+  }
  },
  "facilities": [
   {
@@ -22,7 +30,14 @@
    "lat": 35.626147,
    "lng": 139.8879186,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/230/",
+   "durationMin": 12,
+   "staticSource": {
+    "productionFacilityId": 2,
+    "staticFetchedAt": 1794889409666,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "スパークリング・ジュビリー・セレブレーション",
@@ -31,7 +46,13 @@
    "lat": 35.6264517,
    "lng": 139.8869221,
    "kind": "representative",
-   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule)."
+   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule).",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/show/detail/7404/",
+   "staticSource": {
+    "productionFacilityId": 3,
+    "staticFetchedAt": 1794795075750,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ソアリン：ファンタスティック・フライト",
@@ -40,7 +61,14 @@
    "lat": 35.627691,
    "lng": 139.885425,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/219/",
+   "durationMin": 5,
+   "staticSource": {
+    "productionFacilityId": 4,
+    "staticFetchedAt": 1794889409692,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ディズニー・クリスマス・グリーティング",
@@ -49,7 +77,13 @@
    "lat": 35.6264517,
    "lng": 139.8869221,
    "kind": "representative",
-   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule)."
+   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule).",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/show/detail/953/",
+   "staticSource": {
+    "productionFacilityId": 5,
+    "staticFetchedAt": 1794874183183,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "カフェ・ポルトフィーノ",
@@ -58,7 +92,13 @@
    "lat": 35.6270253,
    "lng": 139.8870537,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/restaurant/detail/400/",
+   "staticSource": {
+    "productionFacilityId": 6,
+    "staticFetchedAt": 1794727968395,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "タートル・トーク",
@@ -67,7 +107,14 @@
    "lat": 35.623324,
    "lng": 139.887468,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/246/",
+   "durationMin": 30,
+   "staticSource": {
+    "productionFacilityId": 8,
+    "staticFetchedAt": 1794870750268,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "トイ・ストーリー・マニア！",
@@ -76,7 +123,14 @@
    "lat": 35.624583,
    "lng": 139.88912,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/218/",
+   "durationMin": 7,
+   "staticSource": {
+    "productionFacilityId": 9,
+    "staticFetchedAt": 1794889409764,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "タワー・オブ・テラー",
@@ -85,7 +139,14 @@
    "lat": 35.624096,
    "lng": 139.888268,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/243/",
+   "durationMin": 2,
+   "staticSource": {
+    "productionFacilityId": 11,
+    "staticFetchedAt": 1794865917994,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ニューヨーク・デリ",
@@ -94,7 +155,13 @@
    "lat": 35.6253888,
    "lng": 139.8878656,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/restaurant/detail/422/",
+   "staticSource": {
+    "productionFacilityId": 12,
+    "staticFetchedAt": 1794726631482,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ビリーヴ！～シー・オブ・ドリームス～",
@@ -103,7 +170,13 @@
    "lat": 35.6264517,
    "lng": 139.8869221,
    "kind": "representative",
-   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule)."
+   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule).",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/show/detail/967/",
+   "staticSource": {
+    "productionFacilityId": 14,
+    "staticFetchedAt": 1794889409860,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "スターブライト・クリスマス",
@@ -112,7 +185,13 @@
    "lat": 35.6264517,
    "lng": 139.8869221,
    "kind": "representative",
-   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule)."
+   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule).",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/show/detail/952/",
+   "staticSource": {
+    "productionFacilityId": 15,
+    "staticFetchedAt": 1794889409949,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "エンポーリオ",
@@ -121,7 +200,12 @@
    "lat": 35.626882,
    "lng": 139.887937,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "staticSource": {
+    "productionFacilityId": 16,
+    "staticFetchedAt": 1794684902816,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "アナとエルサのフローズンジャーニー",
@@ -130,7 +214,14 @@
    "lat": 35.629945,
    "lng": 139.877251,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/255/",
+   "durationMin": 7,
+   "staticSource": {
+    "productionFacilityId": 19,
+    "staticFetchedAt": 1794889409635,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ラプンツェルのランタンフェスティバル",
@@ -139,7 +230,14 @@
    "lat": 35.628984,
    "lng": 139.879654,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/256/",
+   "durationMin": 5,
+   "staticSource": {
+    "productionFacilityId": 20,
+    "staticFetchedAt": 1794874183122,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "フェアリー・ティンカーベルのビジーバギー",
@@ -148,7 +246,14 @@
    "lat": 35.628281,
    "lng": 139.877928,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/258/",
+   "durationMin": 2,
+   "staticSource": {
+    "productionFacilityId": 21,
+    "staticFetchedAt": 1794874182892,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "アレンデール・ロイヤルバンケット",
@@ -157,7 +262,13 @@
    "lat": 35.629413,
    "lng": 139.878062,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/restaurant/detail/409/",
+   "staticSource": {
+    "productionFacilityId": 22,
+    "staticFetchedAt": 1794727968260,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "センター・オブ・ジ・アース",
@@ -166,7 +277,14 @@
    "lat": 35.6262272,
    "lng": 139.8845498,
    "kind": "facility",
-   "provenance": "Original app facility dictionary value, formerly marked unverified; corroborated on 2026-11-18 (record BJ) by two traceable sources: Wikidata Q3186999 coordinate (P625: 35.62611111, 139.88444444) within 16 m, and OpenStreetMap node 2770576786 (name センター・オブ・ジ・アース, attraction=roller_coaster) within 66 m."
+   "provenance": "Original app facility dictionary value, formerly marked unverified; corroborated on 2026-11-18 (record BJ) by two traceable sources: Wikidata Q3186999 coordinate (P625: 35.62611111, 139.88444444) within 16 m, and OpenStreetMap node 2770576786 (name センター・オブ・ジ・アース, attraction=roller_coaster) within 66 m.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/223/",
+   "durationMin": 3,
+   "staticSource": {
+    "productionFacilityId": 24,
+    "staticFetchedAt": 1794889409720,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "海底2万マイル",
@@ -175,7 +293,14 @@
    "lat": 35.626961,
    "lng": 139.884472,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/224/",
+   "durationMin": 5,
+   "staticSource": {
+    "productionFacilityId": 25,
+    "staticFetchedAt": 1794725956282,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "シンドバッド・ストーリーブック・ヴォヤッジ",
@@ -184,7 +309,14 @@
    "lat": 35.62875,
    "lng": 139.881621,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/235/",
+   "durationMin": 10,
+   "staticSource": {
+    "productionFacilityId": 26,
+    "staticFetchedAt": 1794874182967,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "マジックランプシアター",
@@ -193,7 +325,14 @@
    "lat": 35.6285626,
    "lng": 139.883104,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/226/",
+   "durationMin": 23,
+   "staticSource": {
+    "productionFacilityId": 27,
+    "staticFetchedAt": 1794690312452,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "カスバ・フードコート",
@@ -202,7 +341,13 @@
    "lat": 35.628461,
    "lng": 139.882695,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/restaurant/detail/463/",
+   "staticSource": {
+    "productionFacilityId": 28,
+    "staticFetchedAt": 1794874183019,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ニモ＆フレンズ・シーライダー",
@@ -211,7 +356,14 @@
    "lat": 35.6249184,
    "lng": 139.8825063,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/247/",
+   "durationMin": 5,
+   "staticSource": {
+    "productionFacilityId": 29,
+    "staticFetchedAt": 1794889409742,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "リストランテ・ディ・カナレット",
@@ -220,7 +372,13 @@
    "lat": 35.625687,
    "lng": 139.887773,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/restaurant/detail/408/",
+   "staticSource": {
+    "productionFacilityId": 32,
+    "staticFetchedAt": 1794889409789,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ダンス・ザ・グローブ！",
@@ -229,7 +387,13 @@
    "lat": 35.624423,
    "lng": 139.887676,
    "kind": "venue",
-   "provenance": "Venue point of ウォーターフロントパーク (American Waterfront), this show's performance venue. The original app dictionary value (formerly marked unverified) is identical within 0.01 m to the Nominatim point of ウォーターフロントパーク (way 659417310), queried 2026-11-18 (record BJ)."
+   "provenance": "Venue point of ウォーターフロントパーク (American Waterfront), this show's performance venue. The original app dictionary value (formerly marked unverified) is identical within 0.01 m to the Nominatim point of ウォーターフロントパーク (way 659417310), queried 2026-11-18 (record BJ).",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/show/detail/7604/",
+   "staticSource": {
+    "productionFacilityId": 33,
+    "staticFetchedAt": 1794889409809,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ケープコッド・クックオフ",
@@ -238,7 +402,13 @@
    "lat": 35.624612,
    "lng": 139.885083,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/restaurant/detail/446/",
+   "staticSource": {
+    "productionFacilityId": 35,
+    "staticFetchedAt": 1794889409833,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "【環境演出】スパークリング・ジュビリー・ナイト",
@@ -247,7 +417,13 @@
    "lat": 35.6264517,
    "lng": 139.8869221,
    "kind": "representative",
-   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule)."
+   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule).",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/show/detail/7405/",
+   "staticSource": {
+    "productionFacilityId": 36,
+    "staticFetchedAt": 1794889409881,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ピーターパンのネバーランドアドベンチャー",
@@ -256,7 +432,14 @@
    "lat": 35.627859,
    "lng": 139.8789337,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/257/",
+   "durationMin": 6,
+   "staticSource": {
+    "productionFacilityId": 37,
+    "staticFetchedAt": 1794874183152,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ジャンピン・ジェリーフィッシュ",
@@ -265,7 +448,14 @@
    "lat": 35.6264458,
    "lng": 139.8833143,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/239/",
+   "durationMin": 1,
+   "staticSource": {
+    "productionFacilityId": 61,
+    "staticFetchedAt": 1794870750398,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ジャスミンのフライングカーペット",
@@ -274,7 +464,14 @@
    "lat": 35.6283524,
    "lng": 139.8810948,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/220/",
+   "durationMin": 2,
+   "staticSource": {
+    "productionFacilityId": 62,
+    "staticFetchedAt": 1794874183301,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "インディ・ジョーンズ・アドベンチャー：クリスタルスカルの魔宮",
@@ -283,7 +480,14 @@
    "lat": 35.6267129,
    "lng": 139.8806129,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/222/",
+   "durationMin": 3,
+   "staticSource": {
+    "productionFacilityId": 65,
+    "staticFetchedAt": 1794723352353,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "レイジングスピリッツ",
@@ -292,7 +496,14 @@
    "lat": 35.6277111,
    "lng": 139.8807931,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/242/",
+   "durationMin": 2,
+   "staticSource": {
+    "productionFacilityId": 66,
+    "staticFetchedAt": 1794889409928,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "スカイ・フル・オブ・カラーズ",
@@ -301,7 +512,12 @@
    "lat": 35.6264517,
    "lng": 139.8869221,
    "kind": "representative",
-   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule). A name-matched Nominatim node exists about 515 m away and is rejected by the parkwide rule (§25 case 32)."
+   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule). A name-matched Nominatim node exists about 515 m away and is rejected by the parkwide rule (§25 case 32).",
+   "staticSource": {
+    "productionFacilityId": 71,
+    "staticFetchedAt": 1794723352189,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ニューデイ、ニュードリームス",
@@ -310,7 +526,12 @@
    "lat": 35.6264517,
    "lng": 139.8869221,
    "kind": "representative",
-   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule)."
+   "provenance": "Park representative point (Mediterranean Harbor entrance-area point; see area-points.json). Parkwide/harbor program with no fixed venue; the original dictionary carries this point for the entry (§10 parkwide rule).",
+   "staticSource": {
+    "productionFacilityId": 73,
+    "staticFetchedAt": 1794690160803,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "スナグリーダックリング",
@@ -319,7 +540,12 @@
    "lat": 35.6291282,
    "lng": 139.8786303,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "staticSource": {
+    "productionFacilityId": 74,
+    "staticFetchedAt": 1794727968281,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ルックアウト・クックアウト",
@@ -328,7 +554,12 @@
    "lat": 35.6281697,
    "lng": 139.8782511,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "staticSource": {
+    "productionFacilityId": 75,
+    "staticFetchedAt": 1794727968304,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ファンタジースプリングス・ギフト",
@@ -337,7 +568,12 @@
    "lat": 35.6282401,
    "lng": 139.8770569,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "staticSource": {
+    "productionFacilityId": 76,
+    "staticFetchedAt": 1794727968439,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ケープコッド・クックオフ（ショーダイニングエリア）",
@@ -346,7 +582,13 @@
    "lat": 35.624612,
    "lng": 139.885083,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/restaurant/detail/447/",
+   "staticSource": {
+    "productionFacilityId": 107,
+    "staticFetchedAt": 1794870765518,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "美女と野獣“魔法のものがたり”",
@@ -355,7 +597,14 @@
    "lat": 35.6304511,
    "lng": 139.8778894,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/197/",
+   "durationMin": 8,
+   "staticSource": {
+    "productionFacilityId": 77,
+    "staticFetchedAt": 1794871970031,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "イッツ・ア・スモールワールド",
@@ -364,7 +613,14 @@
    "lat": 35.6304467,
    "lng": 139.8812413,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/172/",
+   "durationMin": 10,
+   "staticSource": {
+    "productionFacilityId": 78,
+    "staticFetchedAt": 1794872834587,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "プーさんのハニーハント",
@@ -373,7 +629,14 @@
    "lat": 35.6302111,
    "lng": 139.8805376,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/174/",
+   "durationMin": 5,
+   "staticSource": {
+    "productionFacilityId": 79,
+    "staticFetchedAt": 1794796332135,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "空飛ぶダンボ",
@@ -382,7 +645,13 @@
    "lat": 35.6314631,
    "lng": 139.8816938,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/169/",
+   "staticSource": {
+    "productionFacilityId": 81,
+    "staticFetchedAt": 1794756855397,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "アリスのティーパーティー",
@@ -391,7 +660,13 @@
    "lat": 35.6311492,
    "lng": 139.8809805,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/173/",
+   "staticSource": {
+    "productionFacilityId": 82,
+    "staticFetchedAt": 1794756856919,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ベイマックスのハッピーライド",
@@ -400,7 +675,13 @@
    "lat": 35.6317007,
    "lng": 139.8788382,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/196/",
+   "staticSource": {
+    "productionFacilityId": 84,
+    "staticFetchedAt": 1794799470056,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "カリブの海賊",
@@ -409,7 +690,13 @@
    "lat": 35.6347638,
    "lng": 139.8813485,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/152/",
+   "staticSource": {
+    "productionFacilityId": 85,
+    "staticFetchedAt": 1794796332156,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "クイーン・オブ・ハートのバンケットホール",
@@ -418,7 +705,13 @@
    "lat": 35.6309372,
    "lng": 139.8814195,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/restaurant/detail/349/",
+   "staticSource": {
+    "productionFacilityId": 87,
+    "staticFetchedAt": 1794872834608,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ミッキーのフィルハーマジック",
@@ -427,7 +720,14 @@
    "lat": 35.6314952,
    "lng": 139.8806414,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/167/",
+   "durationMin": 16,
+   "staticSource": {
+    "productionFacilityId": 101,
+    "staticFetchedAt": 1794872834684,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "プラザパビリオン・レストラン",
@@ -436,7 +736,12 @@
    "lat": 35.6328582,
    "lng": 139.8815443,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "staticSource": {
+    "productionFacilityId": 102,
+    "staticFetchedAt": 1794731197841,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "カントリーベア・シアター",
@@ -445,7 +750,12 @@
    "lat": 35.6325284,
    "lng": 139.8824532,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "staticSource": {
+    "productionFacilityId": 103,
+    "staticFetchedAt": 1794731197900,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "カフェ・オーリンズ",
@@ -454,7 +764,12 @@
    "lat": 35.6342023,
    "lng": 139.8811664,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "staticSource": {
+    "productionFacilityId": 104,
+    "staticFetchedAt": 1794731197923,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "イーストサイド・カフェ",
@@ -463,7 +778,13 @@
    "lat": 35.6345587,
    "lng": 139.8801459,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/restaurant/detail/300/",
+   "staticSource": {
+    "productionFacilityId": 108,
+    "staticFetchedAt": 1794871970142,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ザ・ダイヤモンドホースシュー",
@@ -472,7 +793,13 @@
    "lat": 35.6326333,
    "lng": 139.8816527,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/restaurant/detail/336/",
+   "staticSource": {
+    "productionFacilityId": 109,
+    "staticFetchedAt": 1794799470115,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ウエスタンリバー鉄道",
@@ -481,7 +808,14 @@
    "lat": 35.6332414,
    "lng": 139.8854715,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/154/",
+   "durationMin": 15,
+   "staticSource": {
+    "productionFacilityId": 113,
+    "staticFetchedAt": 1794871970199,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "オムニバス",
@@ -490,7 +824,14 @@
    "lat": 35.6330125,
    "lng": 139.8796956,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/151/",
+   "durationMin": 6,
+   "staticSource": {
+    "productionFacilityId": 117,
+    "staticFetchedAt": 1794872834510,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ミッキーの家とミート・ミッキー",
@@ -499,7 +840,13 @@
    "lat": 35.6302495,
    "lng": 139.8785992,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/greeting/detail/909/",
+   "staticSource": {
+    "productionFacilityId": 118,
+    "staticFetchedAt": 1794872834535,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "キャプテンフックス・ギャレー",
@@ -508,7 +855,13 @@
    "lat": 35.6319879,
    "lng": 139.8820402,
    "kind": "facility",
-   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census."
+   "provenance": "Original app facility dictionary (getfacilitydictionary, exported 2026-11-18); independently reproduced at 0 m by the §10 Nominatim rule in the 2026-11-18 full census.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/restaurant/detail/346/",
+   "staticSource": {
+    "productionFacilityId": 121,
+    "staticFetchedAt": 1794872834634,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ディズニーシー・エレクトリックレールウェイ（ポートディスカバリー）",
@@ -517,7 +870,12 @@
    "lat": 35.6250071,
    "lng": 139.8856057,
    "kind": "facility",
-   "provenance": "Settled by the §10 Nominatim rule in the 2026-11-18 full census (step 2b, shortened form ディズニーシー・エレクトリックレールウェイ); the original dictionary held no coordinates for this facility."
+   "provenance": "Settled by the §10 Nominatim rule in the 2026-11-18 full census (step 2b, shortened form ディズニーシー・エレクトリックレールウェイ); the original dictionary held no coordinates for this facility.",
+   "staticSource": {
+    "productionFacilityId": 30,
+    "staticFetchedAt": 1794477358863,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ドリームス・テイク・フライト",
@@ -526,7 +884,13 @@
    "lat": 35.6257667,
    "lng": 139.8825777,
    "kind": "venue",
-   "provenance": "Venue point of ハンガーステージ (Lost River Delta), the venue named for this show in official Tokyo Disney Resort sources; Nominatim way 222615180 (amenity=theatre), queried 2026-11-18 (record BJ)."
+   "provenance": "Venue point of ハンガーステージ (Lost River Delta), the venue named for this show in official Tokyo Disney Resort sources; Nominatim way 222615180 (amenity=theatre), queried 2026-11-18 (record BJ).",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tds/show/detail/7602/",
+   "staticSource": {
+    "productionFacilityId": 68,
+    "staticFetchedAt": 1794889409905,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "モンスターズ・インク“ライド＆ゴーシーク！”",
@@ -535,7 +899,14 @@
    "lat": 35.6339596,
    "lng": 139.8783588,
    "kind": "facility",
-   "provenance": "Nominatim bounded search (Land viewbox), 2026-11-18: way 217930681 (name モンスターズ・インク“ライドゴーシーク”, attraction=dark_ride); the same way's Overpass center lies within 4.8 m, and Wikidata Q6902878 (P625, coarse precision) within about 63 m (record BJ)."
+   "provenance": "Nominatim bounded search (Land viewbox), 2026-11-18: way 217930681 (name モンスターズ・インク“ライドゴーシーク”, attraction=dark_ride); the same way's Overpass center lies within 4.8 m, and Wikidata Q6902878 (P625, coarse precision) within about 63 m (record BJ).",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/189/",
+   "durationMin": 4,
+   "staticSource": {
+    "productionFacilityId": 80,
+    "staticFetchedAt": 1794730315731,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "キャッスルカルーセル",
@@ -544,7 +915,13 @@
    "lat": 35.6313864,
    "lng": 139.881256,
    "kind": "facility",
-   "provenance": "Settled by the §10 Nominatim rule in the 2026-11-18 full census (step 1; matched candidate name キャッスルカールセル); the original dictionary held no coordinates for this facility."
+   "provenance": "Settled by the §10 Nominatim rule in the 2026-11-18 full census (step 1; matched candidate name キャッスルカールセル); the original dictionary held no coordinates for this facility.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/170/",
+   "staticSource": {
+    "productionFacilityId": 83,
+    "staticFetchedAt": 1794756858682,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ミニー＠ファンダーランド",
@@ -553,7 +930,14 @@
    "lat": 35.6343228,
    "lng": 139.8795861,
    "kind": "representative",
-   "provenance": "Park representative point (World Bazaar point; see area-points.json). Parade-route / parkwide program with no fixed venue (§10 parkwide rule); settled in record BJ, 2026-11-18."
+   "provenance": "Park representative point (World Bazaar point; see area-points.json). Parade-route / parkwide program with no fixed venue (§10 parkwide rule); settled in record BJ, 2026-11-18.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/en/tdl/show/detail/897/",
+   "durationMin": 40,
+   "staticSource": {
+    "productionFacilityId": 86,
+    "staticFetchedAt": 1794756853667,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "トイズ・ワンダラス・クリスマス！",
@@ -562,7 +946,13 @@
    "lat": 35.6343228,
    "lng": 139.8795861,
    "kind": "representative",
-   "provenance": "Park representative point (World Bazaar point; see area-points.json). Parade-route / parkwide program with no fixed venue (§10 parkwide rule); settled in record BJ, 2026-11-18."
+   "provenance": "Park representative point (World Bazaar point; see area-points.json). Parade-route / parkwide program with no fixed venue (§10 parkwide rule); settled in record BJ, 2026-11-18.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/show/schedule/7003/",
+   "staticSource": {
+    "productionFacilityId": 93,
+    "staticFetchedAt": 1794872834757,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ディズニー・ハーモニー・イン・カラー",
@@ -571,7 +961,13 @@
    "lat": 35.6343228,
    "lng": 139.8795861,
    "kind": "representative",
-   "provenance": "Park representative point (World Bazaar point; see area-points.json). Parade-route / parkwide program with no fixed venue (§10 parkwide rule); settled in record BJ, 2026-11-18."
+   "provenance": "Park representative point (World Bazaar point; see area-points.json). Parade-route / parkwide program with no fixed venue (§10 parkwide rule); settled in record BJ, 2026-11-18.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/show/schedule/7000/",
+   "staticSource": {
+    "productionFacilityId": 94,
+    "staticFetchedAt": 1794871970059,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ミッキーのマジカルミュージックワールド",
@@ -580,7 +976,13 @@
    "lat": 35.6313055,
    "lng": 139.8773417,
    "kind": "venue",
-   "provenance": "Venue point of ファンタジーランド・フォレストシアター (Fantasyland), this show's theater in official Tokyo Disney Resort sources; Nominatim way 754497694 (amenity=theatre), queried 2026-11-18 (record BJ)."
+   "provenance": "Venue point of ファンタジーランド・フォレストシアター (Fantasyland), this show's theater in official Tokyo Disney Resort sources; Nominatim way 754497694 (amenity=theatre), queried 2026-11-18 (record BJ).",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/show/schedule/895/",
+   "staticSource": {
+    "productionFacilityId": 95,
+    "staticFetchedAt": 1794871970224,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "東京ディズニーランド・エレクトリカルパレード・ドリームライツ",
@@ -589,7 +991,13 @@
    "lat": 35.6343228,
    "lng": 139.8795861,
    "kind": "representative",
-   "provenance": "Park representative point (World Bazaar point; see area-points.json). Parade-route / parkwide program with no fixed venue (§10 parkwide rule); settled in record BJ, 2026-11-18. A name-matched Nominatim node exists (35.6332582, 139.8807865, census step 1) but the parkwide rule takes precedence, as with スカイ・フル・オブ・カラーズ."
+   "provenance": "Park representative point (World Bazaar point; see area-points.json). Parade-route / parkwide program with no fixed venue (§10 parkwide rule); settled in record BJ, 2026-11-18. A name-matched Nominatim node exists (35.6332582, 139.8807865, census step 1) but the parkwide rule takes precedence, as with スカイ・フル・オブ・カラーズ.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/show/schedule/913/",
+   "staticSource": {
+    "productionFacilityId": 97,
+    "staticFetchedAt": 1794799470136,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "スターブライト・クリスマス",
@@ -598,7 +1006,13 @@
    "lat": 35.6343228,
    "lng": 139.8795861,
    "kind": "representative",
-   "provenance": "Park representative point (World Bazaar point; see area-points.json). Parade-route / parkwide program with no fixed venue (§10 parkwide rule); settled in record BJ, 2026-11-18."
+   "provenance": "Park representative point (World Bazaar point; see area-points.json). Parade-route / parkwide program with no fixed venue (§10 parkwide rule); settled in record BJ, 2026-11-18.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/show/schedule/951/",
+   "staticSource": {
+    "productionFacilityId": 98,
+    "staticFetchedAt": 1794799470158,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ピーターパン空の旅",
@@ -607,7 +1021,12 @@
    "lat": 35.6319367,
    "lng": 139.8817773,
    "kind": "facility",
-   "provenance": "OpenStreetMap node 13713865570 via Overpass, 2026-11-18: name ピーターパン空の旅, attraction=dark_ride, Wikidata Q2916451, official Tokyo Disneyland website in its tags (record BJ)."
+   "provenance": "OpenStreetMap node 13713865570 via Overpass, 2026-11-18: name ピーターパン空の旅, attraction=dark_ride, Wikidata Q2916451, official Tokyo Disneyland website in its tags (record BJ).",
+   "staticSource": {
+    "productionFacilityId": 99,
+    "staticFetchedAt": 1794799470202,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ジャンボリミッキー！レッツ・ダンス！",
@@ -616,7 +1035,13 @@
    "lat": 35.634254,
    "lng": 139.8817086,
    "kind": "venue",
-   "provenance": "Venue point of シアターオーリンズ (Adventureland), this show's stage in official Tokyo Disney Resort sources; Nominatim way 217842054 (amenity=theatre), queried 2026-11-18 (record BJ)."
+   "provenance": "Venue point of シアターオーリンズ (Adventureland), this show's stage in official Tokyo Disney Resort sources; Nominatim way 217842054 (amenity=theatre), queried 2026-11-18 (record BJ).",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/show/schedule/985/",
+   "staticSource": {
+    "productionFacilityId": 100,
+    "staticFetchedAt": 1794799470095,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "センターストリート・コーヒーハウス",
@@ -625,7 +1050,12 @@
    "lat": 35.6342033,
    "lng": 139.8791317,
    "kind": "facility",
-   "provenance": "Settled by the §10 Nominatim rule in the 2026-11-18 full census (step 1); identical to OpenStreetMap node 3692911385 (Overpass, 2026-11-18). The original dictionary held no coordinates for this facility."
+   "provenance": "Settled by the §10 Nominatim rule in the 2026-11-18 full census (step 1); identical to OpenStreetMap node 3692911385 (Overpass, 2026-11-18). The original dictionary held no coordinates for this facility.",
+   "staticSource": {
+    "productionFacilityId": 105,
+    "staticFetchedAt": 1794731198026,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ホーンテッドマンション",
@@ -634,7 +1064,12 @@
    "lat": 35.6305519,
    "lng": 139.8821407,
    "kind": "facility",
-   "provenance": "Settled by the §10 Nominatim rule in the 2026-11-18 full census (step 1); the original dictionary held no coordinates for this facility."
+   "provenance": "Settled by the §10 Nominatim rule in the 2026-11-18 full census (step 1); the original dictionary held no coordinates for this facility.",
+   "staticSource": {
+    "productionFacilityId": 106,
+    "staticFetchedAt": 1794731198089,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ジャングルクルーズ：ワイルドライフ・エクスペディション",
@@ -643,7 +1078,14 @@
    "lat": 35.6339528,
    "lng": 139.8824076,
    "kind": "facility",
-   "provenance": "Settled by the §10 Nominatim rule in the 2026-11-18 full census (step 2b, shortened form ジャングルクルーズ); the original dictionary held no coordinates for this facility."
+   "provenance": "Settled by the §10 Nominatim rule in the 2026-11-18 full census (step 2b, shortened form ジャングルクルーズ); the original dictionary held no coordinates for this facility.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/153/",
+   "durationMin": 10,
+   "staticSource": {
+    "productionFacilityId": 119,
+    "staticFetchedAt": 1794872658198,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "魅惑のチキルーム：スティッチ・プレゼンツ“アロハ・エ・コモ・マイ！”",
@@ -652,7 +1094,14 @@
    "lat": 35.6331122,
    "lng": 139.882374,
    "kind": "facility",
-   "provenance": "Settled by the §10 Nominatim rule in the 2026-11-18 full census (step 1); the original dictionary held no coordinates for this facility."
+   "provenance": "Settled by the §10 Nominatim rule in the 2026-11-18 full census (step 1); the original dictionary held no coordinates for this facility.",
+   "officialUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/156/",
+   "durationMin": 10,
+   "staticSource": {
+    "productionFacilityId": 120,
+    "staticFetchedAt": 1794872659558,
+    "source": "production app facility dictionary (facilities row, matched by park + name_key)"
+   }
   },
   {
    "name": "ハンガーステージ",
@@ -661,7 +1110,8 @@
    "lat": 35.6257667,
    "lng": 139.8825777,
    "kind": "venue",
-   "provenance": "Venue entry. Nominatim way 222615180 (amenity=theatre); Japanese and English name queries agree (2026-11-18, record BJ)."
+   "provenance": "Venue entry. Nominatim way 222615180 (amenity=theatre); Japanese and English name queries agree (2026-11-18, record BJ).",
+   "staticSource": null
   },
   {
    "name": "ウォーターフロントパーク",
@@ -670,7 +1120,8 @@
    "lat": 35.6244229,
    "lng": 139.8876761,
    "kind": "venue",
-   "provenance": "Venue entry (open-air performance space). Nominatim way 659417310 (leisure=park), queried 2026-11-18 (record BJ)."
+   "provenance": "Venue entry (open-air performance space). Nominatim way 659417310 (leisure=park), queried 2026-11-18 (record BJ).",
+   "staticSource": null
   },
   {
    "name": "ファンタジーランド・フォレストシアター",
@@ -679,7 +1130,8 @@
    "lat": 35.6313055,
    "lng": 139.8773417,
    "kind": "venue",
-   "provenance": "Venue entry. Nominatim way 754497694 (amenity=theatre); Japanese and English name queries agree (2026-11-18, record BJ)."
+   "provenance": "Venue entry. Nominatim way 754497694 (amenity=theatre); Japanese and English name queries agree (2026-11-18, record BJ).",
+   "staticSource": null
   },
   {
    "name": "シアターオーリンズ",
@@ -688,7 +1140,8 @@
    "lat": 35.634254,
    "lng": 139.8817086,
    "kind": "venue",
-   "provenance": "Venue entry. Nominatim way 217842054 (amenity=theatre), queried 2026-11-18 (record BJ)."
+   "provenance": "Venue entry. Nominatim way 217842054 (amenity=theatre), queried 2026-11-18 (record BJ).",
+   "staticSource": null
   }
  ]
 }
