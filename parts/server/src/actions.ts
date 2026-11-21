@@ -5372,7 +5372,7 @@ park: "land" | "sea",
 targetDate: string | null,
 ): string {
 const dateArg = targetDate?? "対象日（YYYY-MM-DD）";
-return pb.fill("acquisitionPlan.skeleton", { park: park, dateArg: dateArg });
+return pb.fill("acquisitionPlan.skeleton", { park: park, dateArg: dateArg, park2: park, dateArg2: dateArg });
 }
 
 function buildAssignment(
@@ -6126,9 +6126,11 @@ dayOf: dayOf != null,
 // storehouse reads and sync, planAcquisition / submitSitemap,
 // saveSourceSnapshots, saveNormalizedFacts, saveRestaurantFacts,
 // saveFacilities, saveAreaTravelTimes and getFacilityDictionary
-// each write their own start/end pair into the open run (nothing
-// when no run is open), so those pairs can neither be forgotten
-// by the task nor recorded twice. The task appends only what the
+// each write their own start/end pair into the run of the set
+// whose planSetId the caller passed (nothing when the caller
+// passed no planSetId, or that set has no open run), so those
+// pairs can neither be forgotten by the task nor recorded twice,
+// and never land in another processing's run. The task appends only what the
 // server cannot see, through the recordRunEvent action, following
 // the 【過程記録】 block appended to every long-run assignment:
 // phase boundaries （取得 / ファクト構築 / 調査 / 下書き）, one
@@ -6537,22 +6539,25 @@ async function closeOpenRunLog(
   await closeRunLog(ctx, runId, outcome, reason, mgr);
 }
 
-// The currently open run, whichever set it belongs to: the target
-// of the server-side auto-recording below. Server actions carry no
-// planSetId (they are addressed by park / date / URL), so — exactly
-// like the save attempts, which the server brackets itself — a
-// server action called while a run is open records into the newest
-// open run, and records nothing when no run is open. Runs whose set
-// has already reached its end are NOT write targets: a finished
-// set's run is only awaiting closure, and writing into it would
-// both contaminate that run's record with unrelated work and keep
+// The currently open run OF ONE SET: the only target of the
+// server-side auto-recording below. A bracketed action records
+// only when its caller passes planSetId, and then only into that
+// set's own open run — never into another processing's run that
+// happens to be open at the same time (a restaurant-correction
+// task, which has no run of its own, calling saveSourceSnapshots /
+// saveRestaurantFacts while a generation run was open used to land
+// its events in the generation run). Runs whose set has already
+// reached its end are NOT write targets: a finished set's run is
+// only awaiting closure, and writing into it would both
+// contaminate that run's record with unrelated work and keep
 // resetting the sweep's silence window, so the run would stay open
 // far past its own end. A run is live while its set is generating,
 // or — for a partial replacement on a completed set — while the
 // replaced slot is still generating (the same liveness the getState
 // sweep uses when it decides which open runs to leave alone).
-async function findAnyOpenRun(
+async function findOpenRunForSet(
   ctx: Ctx,
+  planSetId: number,
 ): Promise<{ id: number; currentPhase: string | null } | null> {
   const db = ctx.db<typeof schema>();
   const runs = await db
@@ -6564,7 +6569,12 @@ async function findAnyOpenRun(
       slot: schema.runLogs.slot,
     })
     .from(schema.runLogs)
-    .where(eq(schema.runLogs.status, "open"))
+    .where(
+      and(
+        eq(schema.runLogs.planSetId, planSetId),
+        eq(schema.runLogs.status, "open"),
+      ),
+    )
     .orderBy(desc(schema.runLogs.id));
   for (const run of runs) {
     const setRows = await db
@@ -6634,11 +6644,14 @@ function readSegmentDetail(
 }
 
 // Server-side auto-recording for server-executed actions (owner's
-// rule, 2026-11-19): an action the server itself executes — the
+// rule, 2026-11-19; scoped to the caller's own run, record DC):
+// an action the server itself executes — the
 // storehouse reads and sync, the acquisition-plan calls, and the
 // save actions a task calls (snapshots, fact builds, restaurant
 // facts, facility dictionary, area travel times) — writes its own
-// start/end pair into the open run, the same way savePlanSet /
+// start/end pair into the open run OF THE CALLER'S OWN SET (the
+// set whose planSetId the caller passed; no planSetId means no
+// recording, while the operation itself runs as before), the same way savePlanSet /
 // savePlanReplacement already bracket every save attempt. The task
 // no longer records these (its instructions say so), so the pair
 // can neither be forgotten by the task nor recorded twice. The
@@ -6653,6 +6666,7 @@ function readSegmentDetail(
 async function withServerRunBracket<T>(
   ctx: Ctx,
   spec: {
+    planSetId?: number | null;
     kind: "fetch" | "ai_call";
     phase: RunLogPhase;
     label: string;
@@ -6661,9 +6675,12 @@ async function withServerRunBracket<T>(
   },
   fn: () => Promise<T>,
 ): Promise<T> {
+  // Recording is scoped to the caller's own run: no planSetId,
+  // no recording (the operation itself runs exactly as before).
+  if (spec.planSetId == null) return fn();
   let run: { id: number; currentPhase: string | null } | null = null;
   try {
-    run = await findAnyOpenRun(ctx);
+    run = await findOpenRunForSet(ctx, spec.planSetId);
   } catch {
     run = null;
   }
@@ -6736,7 +6753,7 @@ async function withServerRunBracket<T>(
 function runLogSteps(planSetId: number, slot: "A" | "B" | "C" | null): string {
   const slotArg = slot ? `、slot="${slot}"` : "";
   return [
-    `【過程記録（必須）】この実行の過程は、後から「どこで・どの呼び出しの中で止まったか」を特定できるよう、過程記録に残される。次の時点で recordRunEvent アクション（planSetId=${planSetId}${slotArg}）を呼び、時刻つきの記録を残すこと。記録の呼び出し自体は生成の成否に影響しないが、省略すると止まった箇所が特定できなくなる。推測で記録を埋めてはならない（実際に行った手順だけを記録する）。ただし、サーバー側で実行されるアクション（保管庫の読み取りとURL一覧送信、取得計画の判定とサイトマップ提出、材料スナップショットの保存、ファクト構築、レストランファクト登録、施設辞書の確認と保存、エリア間移動時間の登録、プランの保存・検証）の開始／終了は、サーバーが自動で記録する。自分で記録するのは、AI自身の作業の区切り（下書き・評価・自己検証）と、写しを保存しない読み取り（待ち時間参考サイト・混雑予想の情報源など）だけとし、サーバー側のアクションと公式ページの読み取りについて recordRunEvent を呼んではならない（二重記録になるうえ、読み取りについてはタスクの自己申告は実際の時間と一致せず、正式な記録にならない）。なお、開始だけ書いて終了を書かないまま実行が閉じると、サーバーが閉じる時点で「終了の記録なし」と明記した記録を足す（穴は穴として残る）。開始を書いた手順は、必ず終了まで書くこと。`,
+    `【過程記録（必須）】この実行の過程は、後から「どこで・どの呼び出しの中で止まったか」を特定できるよう、過程記録に残される。次の時点で recordRunEvent アクション（planSetId=${planSetId}${slotArg}）を呼び、時刻つきの記録を残すこと。記録の呼び出し自体は生成の成否に影響しないが、省略すると止まった箇所が特定できなくなる。推測で記録を埋めてはならない（実際に行った手順だけを記録する）。ただし、サーバー側で実行されるアクション（保管庫の読み取りとURL一覧送信、取得計画の判定とサイトマップ提出、材料スナップショットの保存、ファクト構築、レストランファクト登録、施設辞書の確認と保存、エリア間移動時間の登録、プランの保存・検証）の開始／終了は、サーバーが自動で記録する。その記録は、このタスク自身の実行（このセットの実行）にだけ残る。これらのアクション（saveSourceSnapshots、planAcquisition、submitSitemap、syncStorehouseUrls、getStorehouseRestaurants、getStorehouseSnapshot、getStorehouseSitemap、saveNormalizedFacts、saveRestaurantFacts、getFacilityDictionary、saveFacilities、saveAreaTravelTimes）を呼ぶときは、planSetId=${planSetId} を必ず渡すこと（渡さなければ、その呼び出しの開始／終了はどの実行にも記録されない。処理自体は従来どおり動く）。自分で記録するのは、AI自身の作業の区切り（下書き・評価・自己検証）と、写しを保存しない読み取り（待ち時間参考サイト・混雑予想の情報源など）だけとし、サーバー側のアクションと公式ページの読み取りについて recordRunEvent を呼んではならない（二重記録になるうえ、読み取りについてはタスクの自己申告は実際の時間と一致せず、正式な記録にならない）。なお、開始だけ書いて終了を書かないまま実行が閉じると、サーバーが閉じる時点で「終了の記録なし」と明記した記録を足す（穴は穴として残る）。開始を書いた手順は、必ず終了まで書くこと。`,
     `・【継続の原則（最重要）】作業は必ず「開始イベント→その作業→終了イベント」で挟むこと。開始イベントを出していない作業を進めてはならず、終了イベントを出さずに次の作業へ移ってはならない。タスクが生きている限り、常にいずれかのラベル付き手順が「進行中」である状態を保つこと（連続するイベントの間に、ラベルの無い空白区間を作らない）。下記に列挙した以外の作業（エリア間移動時間の調査、座標の追加照会、不足ページの取り直し、材料の読み直し等）も、無記録で進めてはならず、内容が分かる label の ai_call_start/ai_call_end（写しを保存しないサイトの読み取りは fetch_start/fetch_end）で挟むこと（サーバー側のアクションと公式ページの読み取りは、上記のとおりサーバーの記録に一本化される）。`,
     `・取得フェーズ: 作業の最初に phase_start（phase="acquisition"、label="取得フェーズ開始"）。このフェーズで使うサーバー側のアクション（syncStorehouseUrls、planAcquisition、getStorehouseSitemap、submitSitemap、getStorehouseRestaurants、getStorehouseSnapshot、getFacilityDictionary、saveSourceSnapshots）の開始／終了は、すべてサーバーが自動で記録する（サイトマップの出所が保管庫であることと保管庫の取得時刻も、サーバーの記録の detail に残る）ので、これらについて recordRunEvent を呼んではならない。保管庫にサイトマップが無く、自分の環境で直接取得した場合だけ、その取得を fetch_start/fetch_end（phase="acquisition"、label="サイトマップ取得"）で挟むこと。公式ページの読み取りについては、開始／終了を自分で書いてはならない（タスクが書いた読み取りの開始／終了は実際の読み取り時間と一致しないことが実測で確定しており、正式な記録の根拠にしない）。代わりに、進め方をこうすること：公式ページは、1ページ読んだら、他のページを読む前に、直ちにそのページの写しを saveSourceSnapshots で保存する（複数ページ分を読み終えてから、まとめて保存してはならない）。保存を受けたサーバーが、そのページの「読み取り完了」を、ページの種類・URLとサーバーの時刻で過程記録に自動で書く。それがそのページの読み取りの正式な記録であり、保存の時刻の並びが、そのまま読み取りの進み方になる。読み取りの中の区切り（開き始め／読み込み完了／操作完了／文章取り出し）は、読み取り用スクリプトが自身の時計で記録し、保存時に readTimings として渡すこと——サーバーがその区切りも過程記録に残す（詳細は3段手順の「読み取りの区切りの時刻」）。取得が終わったら phase_end（phase="acquisition"、label="取得フェーズ終了"）。`,
     `・ファクト構築: 開始時に phase_start（phase="fact_build"、label="ファクト構築開始"）。saveNormalizedFacts と saveRestaurantFacts の開始／終了はサーバーが自動で記録するので、自分で記録してはならない（missing を埋める再登録も同じ）。読み取った内容を解釈・構造化するのにかかった時間は、サーバーが打った「読み取り完了」の記録から、saveNormalizedFacts をサーバーが受けた時刻までの区間として、サーバーの記録だけで測られる（自分の開始／終了の自己申告は、その根拠にならない）。終わったら phase_end（phase="fact_build"、label="ファクト構築終了"）。`,
@@ -15084,6 +15101,7 @@ saveSourceSnapshots: defineAction({
 description:
 "Internal: called by a generation / re-verification task to store the canonical official sources it just fetched — RAW, verbatim — as source_snapshots (kinds: dpa_page, facility_list, operations, show_schedule, ticket_prices, announcements, monthly_calendar, restaurant_list, restaurant_detail). A snapshot whose text came from the Cloudflare storehouse carries fetchMethod \"storehouse\" and sourceFetchedAt (the storehouse's own fetch time, ISO): the server stores that instant as the snapshot's fetchedAt and records the provenance in the completeness note; storehouse material NEVER becomes canonical (canonicality still requires exactly \"browser\"), and it must never be relabelled as an own browser fetch. Snapshots are stored BEFORE anything reads facts from them; normalized facts (saveNormalizedFacts) may only cite text stored here, and their evidence excerpts are machine-checked against these stored texts. CANONICAL CONTRACT (spec §6.2.2): every snapshot MUST carry fetchMethod (how it was fetched — browser / text / script …); a save without it is refused by validation. Every snapshot SHOULD also carry a completeness declaration (completeness: expectationSource = page_declaration / sibling_source / history / none, expectation = the expected content derived from the source itself, result = passed / failed / not_derivable). Canonicality is decided by the SERVER, never by the task: canonical = 1 only when the fetch method records a REAL-BROWSER fetch (fetchMethod exactly \"browser\" — the page was opened in a live browser with all tabs switched and expansions opened; a GET / text-extraction / script fetch NEVER becomes canonical, however complete the text looks, because tabbed/expandable official pages cannot be fully obtained that way), a declaration was given, its result is passed, AND the server's own machine check found no mismatch AND at least one machine-verifiable ANCHOR in the text itself checked out — a declared section whose enumerated count the server recounts and matches: either a 「全N件」 section vs its priced items, or an unpriced enumeration declaration (「…一覧 N件」) vs its enumerated rows. A text carrying no machine-readable declaration at all never becomes canonical on a free-text declaration alone. Anything else is stored with canonical = 0 — the save itself is not refused; what is guaranteed is that a partial text is never silently canonical. The completenessNote records which anchors verified (or that there were none). Only canonical snapshots can ground normalized facts. Returns the new snapshot ids in payload order, plus `canonical` — a boolean array in the same order saying which snapshots became canonical. Saving a batch in multiple calls under the same batchId (at most 12 snapshots per call) is a legitimate procedure, and getSourceSnapshots reads back the whole batch (up to 200 snapshots). READ-COMPLETION STAMPS: while a run is open, the server also stamps one 読み取り完了 record per saved snapshot into that run's process record (the page's kind and URL, on the server's clock) — the formal record of when that page's read completed. Save each page immediately after reading it, before reading the next page (never read several pages and batch-save them later): the stamps' order is the reading's progress, and a task-written start/end pair for a page read is not a record of the read. READ SEGMENTS: when the reading script passes readTimings with a snapshot (its own clock's stamps: open started / load completed / operations completed / text extracted), the server also records the read's segments into the run's process record — with the per-segment seconds it computes from the stamps — and stores the stamps with the snapshot's completeness note, so whether the time went to loading, to operations, or to extraction is readable from the record directly.",
 request: z.object({
+planSetId: z.number().int().positive().optional(),
 batchId: z.string().min(1).max(120),
 snapshots: z
 .array(
@@ -15174,6 +15192,7 @@ ctx,
 args,
 ): Promise<{ ok: true; snapshotIds: number[]; canonical: boolean[] }> {
 return await withServerRunBracket(ctx, {
+planSetId: args.planSetId,
 kind: "ai_call",
 phase: "acquisition",
 label: "材料スナップショットの保存",
@@ -15315,7 +15334,7 @@ s.fetchMethod.trim().toLowerCase() === "storehouse"
 // reading it). No open run: nothing is stamped. Recording
 // never breaks the save it observes.
 try {
-const openRun = await findAnyOpenRun(ctx);
+const openRun = args.planSetId != null ? await findOpenRunForSet(ctx, args.planSetId) : null;
 if (openRun != null) {
 const stampPhase: RunLogPhase =
 openRun.currentPhase != null &&
@@ -15535,6 +15554,7 @@ planAcquisition: defineAction({
 description:
 "The acquisition plan layer v3's deterministic decision function （立案）: for one park + target date, first settles the plan itself (fresh / rebuild — when the plan's 3 hours have expired the decision is made by the clock alone and the server fetches nothing itself: it returns planState=\"rebuild\" with needsSitemap=true, and the fetching task carries the sitemap URL set in through submitSitemap, which rebuilds the plan whole and returns this same decision shape; until a set is submitted, the decisions ride on the existing plan skeleton and the creation instant is not advanced), then decides per tree node whether the run FETCHES the page (returning the materialized URL and the node's operations) or REUSES a stored snapshot (returning its id and fetch time), or SKIPS the node (its branch is absent from the sitemap). Reuse is judged ONLY by snapshot existence and freshness: a snapshot of the node's URL fetched within 3 hours of atTime (default: server now; atTime exists so tests can evaluate at a chosen instant). Canonicality, fetch method and completeness declarations do NOT enter the decision. The daily node additionally requires its snapshots to be about targetDate, and when targetDate is the day of atTime the daily node is always fetched regardless of freshness. Restaurant detail leaves are not fetched by the run at all in principle: each is decided \"storehouse\" (read from the storehouse bundle). The restaurant_list node is storehouse-first too: with no fresh local snapshot its decision is \"storehouse\" (read the storehouse's snapshot of the list URL; fetch it with the own browser only when the storehouse holds none). There is no fact-build reuse: fact building always happens from the run's own material.",
 request: z.object({
+planSetId: z.number().int().positive().optional(),
 park: parkEnum,
 targetDate: z.string().min(10).max(10),
 atTime: z.string().max(40).optional(),
@@ -15542,6 +15562,7 @@ atTime: z.string().max(40).optional(),
 response: planDecisionResponse,
 async handler(ctx, args) {
 return await withServerRunBracket(ctx, {
+planSetId: args.planSetId,
 kind: "ai_call",
 phase: "acquisition",
 label: "取得計画の判定",
@@ -15588,6 +15609,7 @@ submitSitemap: defineAction({
 description:
 "Carries the sitemap URL set from the fetching task into the acquisition plan layer v3 (the server never fetches the sitemap itself — owner's decision, 2026-11-19). Call it when planAcquisition returned planState=\"rebuild\" with needsSitemap=true: in principle pass the urls returned by getStorehouseSitemap (the storehouse's Browser Run fetch of the sitemap, Japanese pages only); only when the storehouse holds none, fetch https://www.tokyodisneyresort.jp/sitemap.xml plainly in the task's own environment, extract every <loc> URL, and pass those here. The server validates that every URL is on the official domain (any other URL rejects the whole submission), reduces the set to the branches the plan uses, compares it with the stored set (skeletonSameAsPrevious; null when no earlier set exists), persists the plan row, the whole node set, the sitemap URL set and the creation instant atomically, and returns exactly the same decision shape as planAcquisition (per-node fetch / reuse / storehouse), computed on the rebuilt tree.",
 request: z.object({
+planSetId: z.number().int().positive().optional(),
 urls: z.array(z.string().min(1).max(2048)).min(1).max(20000),
 park: parkEnum,
 targetDate: z.string().min(10).max(10),
@@ -15596,6 +15618,7 @@ atTime: z.string().max(40).optional(),
 response: planDecisionResponse,
 async handler(ctx, args) {
 return await withServerRunBracket(ctx, {
+planSetId: args.planSetId,
 kind: "ai_call",
 phase: "acquisition",
 label: "サイトマップ提出と計画の作り直し",
@@ -15641,7 +15664,7 @@ restaurantLeaves: decided.restaurantLeaves,
 syncStorehouseUrls: defineAction({
 description:
 "Storehouse wiring, called at the start of every fetching turn: builds this run's circulation list — the sitemap URL FIRST, then the fixed 13 URLs (the DPA page's two per-park state URLs, the announcements page, and per park the attraction / show / monthly-calendar / ticket / restaurant-list pages), plus every known restaurant detail URL (learned from the storehouse's own registered list, this copy's stored restaurant_detail snapshots, and the leaf registry) — and POSTs it to the storehouse's /urls entrance (the storehouse sanity-gates the list itself: official domain only, 20–500 URLs). Also refreshes the restaurant leaf registry from what it learns. Never throws: a storehouse outage returns ok=false and the fetching turn proceeds without it.",
-request: z.object({}),
+request: z.object({ planSetId: z.number().int().positive().optional(), }),
 response: z.object({
 ok: z.boolean(),
 posted: z.boolean(),
@@ -15653,6 +15676,7 @@ reason: z.string().nullable(),
 }),
 async handler(
 ctx,
+args,
 ): Promise<{
 ok: boolean;
 posted: boolean;
@@ -15663,6 +15687,7 @@ storehouseListRead: boolean;
 reason: string | null;
 }> {
 return await withServerRunBracket(ctx, {
+planSetId: args.planSetId,
 kind: "fetch",
 phase: "acquisition",
 label: "保管庫へのURL一覧送信",
@@ -15760,7 +15785,7 @@ return { ...base, ok: true, posted: true, reason: null };
 getStorehouseRestaurants: defineAction({
 description:
 "Storehouse wiring: reads the restaurant detail bundle (GET /bundle/restaurants) — every restaurant detail text the storehouse has fetched so far, each with the storehouse's own fetch time. This bundle is the PRINCIPAL source for restaurant detail pages: a run saves the items it uses as restaurant_detail snapshots with fetchMethod \"storehouse\" and sourceFetchedAt = the item's fetchedAt, so the fetch time and the provenance (storehouse) stay on the record the facts are grounded in. Details absent from the bundle are fetched by the run's own browser as before. Returns available=false (never throws) when the storehouse has no bundle yet or cannot be reached. Also registers the bundle's URLs as restaurant leaves.",
-request: z.object({}),
+request: z.object({ planSetId: z.number().int().positive().optional(), }),
 response: z.object({
 available: z.boolean(),
 updatedAt: z.string().nullable(),
@@ -15775,6 +15800,7 @@ text: z.string(),
 }),
 async handler(
 ctx,
+args,
 ): Promise<{
 available: boolean;
 updatedAt: string | null;
@@ -15785,6 +15811,7 @@ fetchedAt: string;
 text: string;
 }[] }> {
 return await withServerRunBracket(ctx, {
+planSetId: args.planSetId,
 kind: "fetch",
 phase: "acquisition",
 label: "保管庫: レストラン詳細の束",
@@ -15843,6 +15870,7 @@ getStorehouseSnapshot: defineAction({
 description:
 "Storehouse wiring: reads one page's snapshot from the storehouse (GET /snapshot?url=) — the principal read for the restaurant_list node (decision \"storehouse\") and the LAST RESORT for any other page whose own browser fetch failed. Returns the stored text with the storehouse's own fetch time. SERVER-SIDE SAVE (owner's fix, 2026-11-20): when a text is found, the SERVER itself saves it at read time as a snapshot of the run — fetchMethod \"storehouse\", fetchedAt = the storehouse's own fetch time (recorded as sourceFetchedAt in the completeness note) — and returns its id as snapshotId; that snapshot IS the run's material for the page. The run does NOT save the text again via saveSourceSnapshots and must never record the page as unconfirmed for not having saved it; it checks the node's anchor against the returned text and never records storehouse material as its own browser fetch (storehouse material never becomes canonical — canonicality still requires exactly \"browser\"). snapshotId is null only when no snapshot could be saved (the URL's kind/park could not be determined, or the URL is a dated daily page — daily pages have no storehouse substitute and are never saved from the storehouse). found=false when the storehouse holds no snapshot for the URL (or cannot be reached — see error); the run then treats the page as not fetched, visibly, as before.",
 request: z.object({
+planSetId: z.number().int().positive().optional(),
 url: z.string().min(1).max(2000),
 }),
 response: z.object({
@@ -15865,6 +15893,7 @@ error: string | null;
 snapshotId: number | null;
 }> {
 return await withServerRunBracket(ctx, {
+planSetId: args.planSetId,
 kind: "fetch",
 phase: "acquisition",
 label: "保管庫: スナップショット",
@@ -15956,7 +15985,7 @@ snapshotId: null,
 getStorehouseSitemap: defineAction({
 description:
 "Storehouse wiring: reads the sitemap URL set from the storehouse (GET /sitemap) — the storehouse fetches https://www.tokyodisneyresort.jp/sitemap.xml with Browser Run on its circulation and serves back the URL set restricted to Japanese pages, with the storehouse's own fetch time. This is the PRINCIPAL sitemap source for the acquisition plan layer v3: when planAcquisition returns planState=\"rebuild\" with needsSitemap=true, the fetching task calls this first and passes the returned urls to submitSitemap (this read's start/end, the storehouse provenance and its fetchedAt are recorded into the open run's process record by the server itself). Only when this returns null does the task fall back to fetching the sitemap directly in its own environment. Returns null (never throws) when the storehouse has not fetched the sitemap yet (404) or cannot be reached.",
-request: z.object({}),
+request: z.object({ planSetId: z.number().int().positive().optional(), }),
 response: z
 .object({
 fetchedAt: z.string(),
@@ -15966,12 +15995,14 @@ urls: z.array(z.string()),
 .nullable(),
 async handler(
 ctx,
+args,
 ): Promise<{
 fetchedAt: string;
 count: number;
 urls: string[];
 } | null> {
 return await withServerRunBracket(ctx, {
+planSetId: args.planSetId,
 kind: "fetch",
 phase: "acquisition",
 label: "保管庫: サイトマップ",
@@ -16010,6 +16041,7 @@ saveNormalizedFacts: defineAction({
 description:
 "Internal: registers one fact build — the AI read of stored source_snapshots, normalized to one DPA fact per facility — after machine validation: (a) every fact's evidence excerpt must be a VERBATIM substring of its referenced snapshot's stored raw text; (b) an eligible fact's price must appear in its excerpt; (c) any application-period date must appear in its excerpt; (d) unknown facts require a reason; not_eligible facts may instead be grounded in the mother-set (facility_list) snapshot via evidenceKind 'universe_listing' with an excerpt naming the facility. Completeness is checked against the mother set (universeNames, read from the build's facility_list snapshot — NEVER the facility dictionary): mother-set facilities with no fact are returned in `missing` and the build is stored as incomplete; an incomplete build can never pass a DPA row at the save gate. Filling the gaps (unknown + reason where a status cannot be read) and re-registering produces a new, complete build. CANONICAL GROUNDING (spec §6.2.2): only canonical snapshots (server-decided at saveSourceSnapshots time — fetch method recorded, completeness declared and passed, server machine check clean, and at least one machine-verifiable anchor in the text itself) may ground a fact build: a non-canonical mother-set snapshot refuses the registration outright, and a fact whose evidence snapshot is not canonical is refused through the per-fact error list. Re-fetch the source under the 3-step procedure and save it again so it becomes canonical, then register the facts. VALUE-FIDELITY DIFF GATE （値の忠実さ）: after the validations above pass, the server diffs every fact that exists non-unknown on BOTH sides against the park's latest complete, non-invalidated build (the baseline; a park's first build has no baseline and is not diffed). A differing unit price (both sides eligible) or a flipped eligibility status is accepted ONLY when the new fact's effectiveFrom is strictly newer than the baseline fact's (a non-null new effectiveFrom against a null or earlier baseline one) — the change is then recorded on the build (valueChanges) and returned in `valueDiff`. Without that justification the server knocks the fact down to unknown itself (price cleared, the submitted evidence kept, unknownReason naming the baseline value/status), records the knockdown, and the build is stored INCOMPLETE even when nothing is missing — so a silently rewritten value can never become canonical. The result is returned in `valueDiff` (baselineBuildId / valueChanges / knockedDown) and disclosed by getFactBuild.",
 request: z.object({
+planSetId: z.number().int().positive().optional(),
 park: parkEnum,
 visitDate: z.string().max(20).nullable().optional(),
 universeSnapshotId: z.number(),
@@ -16064,6 +16096,7 @@ knockedDown: z.infer<typeof factValueKnockdownShape>[];
 };
 }> {
 return await withServerRunBracket(ctx, {
+planSetId: args.planSetId,
 kind: "ai_call",
 phase: "fact_build",
 label: "ファクト構築",
@@ -16082,7 +16115,7 @@ const db = ctx.db<typeof schema>();
 // Stated as one note, so the interval is readable from the
 // trail without trusting any task-side record.
 try {
-const openRun = await findAnyOpenRun(ctx);
+const openRun = args.planSetId != null ? await findOpenRunForSet(ctx, args.planSetId) : null;
 if (openRun != null) {
 const recent = await db
 .select()
@@ -16632,6 +16665,7 @@ saveRestaurantFacts: defineAction({
 description:
 "Internal: registers restaurant facts （レストラン事実レイヤー) — one facility's service type, reservation form (required = 予約必須 / ps = プライオリティ・シーティング対象 / none = 予約の経路なし / unknown = 未確認＋理由） and mobile order (available = 対象 / not_available = 対象外 / unknown = 未確認＋理由）, each grounded in that facility's OWN official restaurant detail page snapshot (kind \"restaurant_detail\", saved first via saveSourceSnapshots). The grounding snapshot MUST have been fetched browser-grade: fetchMethod \"browser\" (this copy's own real browser) or \"storehouse\" (the Cloudflare storehouse's Browser Run fetch — restaurant details are storehouse-first, and the snapshot's recorded fetchMethod + sourceFetchedAt are the fact's provenance); registration against a GET / text-extraction snapshot is refused. Registration machine-checks, at the same level as saveNormalizedFacts: (a) the snapshot is a restaurant_detail snapshot of the same park; (b) every evidence excerpt is a VERBATIM substring of the snapshot's stored raw text; (c) a positive value's excerpt contains a phrase supporting it （予約必須系／プライオリティ・シーティング／モバイルオーダー対象） — a classification inferred from a label (e.g. \"show restaurant, therefore required\") can never pass, because the supporting phrase must be IN the excerpt; (d) a negative value (none / not_available) is grounded either by an excerpt stating non-availability (mobile order only) or by ABSENCE: evidenceKind \"absence\" with an excerpt naming the facility, whereupon the SERVER re-verifies against the full snapshot text that none of the axis's presence markers occur in it, and records the checked marker list on the fact; (e) an unknown value requires a reason and an excerpt naming the facility — unknown is never silently folded into none / not_available; (f) a stated serviceType must appear verbatim in the snapshot text. Facts are valid for 180 days; the plan screen and the PDF derive a restaurant row's display from the newest valid fact. A facility whose official list carries a separate sub-entry (e.g. a show-dining area listed apart from the main restaurant) is registered as its OWN fact under its own official name, grounded in its own page — never merged into the main facility's fact.",
 request: z.object({
+planSetId: z.number().int().positive().optional(),
 park: parkEnum,
 facts: z
 .array(
@@ -16656,6 +16690,7 @@ ctx,
 args,
 ): Promise<{ ok: true; saved: number; factIds: number[] }> {
 return await withServerRunBracket(ctx, {
+planSetId: args.planSetId,
 kind: "ai_call",
 phase: "fact_build",
 label: "レストランファクト登録",
@@ -19850,7 +19885,7 @@ return { ok: true};
 getFacilityDictionary: defineAction({
 description:
 "Internal: returns the facility dictionary （施設辞書） for one park — the static facility attributes fetched at runtime so far (area, official URL, official duration, coordinates, photo presence) with per-group freshness flags, plus each restaurant's CURRENT FACT (restaurantFact: the grounded classification from the restaurant fact layer — serviceType / reservationType / mobileOrder / registeredAt — or null when no valid fact is registered). Coordinates are usable whenever present (no expiry); static attributes and photos are fresh only within their TTL. The generation task reads this first and re-fetches only what is missing or stale — a restaurant whose restaurantFact is null needs its official detail page fetched and a fact registered via saveRestaurantFacts even when its other static attributes are fresh. The bare reservationType / mobileOrder fields are the dictionary's LEGACY classification columns, retained for history only: they are NOT the classification source anymore and must never be used for a plan decision or a display.",
-request: z.object({ park: parkEnum}),
+request: z.object({ park: parkEnum, planSetId: z.number().int().positive().optional(), }),
 response: z.object({
 entries: z.array(
 z.object({
@@ -19882,6 +19917,7 @@ imageFresh: z.boolean(),
 }),
 async handler(ctx, args) {
 return await withServerRunBracket(ctx, {
+planSetId: args.planSetId,
 kind: "ai_call",
 phase: "acquisition",
 label: "施設辞書の確認",
@@ -19953,6 +19989,7 @@ saveFacilities: defineAction({
 description:
 "Internal: called by fetch tasks (the per-generation bulk-fetch script's driver, the image-fetch task) to store freshly fetched static facility attributes into the facility dictionary: coordinates, official URL, area, official duration, intro photo (downloaded here from the supplied official/reference URLs and stored as an owned blob). A restaurant's classification does NOT belong here anymore: it is registered as a grounded fact via saveRestaurantFacts from the facility's own official detail page snapshot. The reservationType / mobileOrder parameters below are the dictionary's LEGACY classification columns, retained only so old callers do not break — new fetches must NOT pass them (a classification must never be guessed, and a label-inferred value recorded in these columns is exactly what the fact layer replaced). Only fields actually fetched are passed; omitted fields keep their stored values and their group's freshness timestamp does not advance. PARK-RANGE CHECK (spec §10): coordinates outside the park's bounding box (land: lat 35.618–35.652 / lng 139.862–139.902; sea: lat 35.608–35.645 / lng 139.862–139.902) are never stored as fact — the facility is saved WITHOUT coordinates and its name is returned in `droppedCoordinates` so the drop is reported, never silent.",
 request: z.object({
+planSetId: z.number().int().positive().optional(),
 park: parkEnum,
 facilities: z
 .array(
@@ -19990,6 +20027,7 @@ ctx,
 args,
 ): Promise<{ ok: true; saved: number; droppedCoordinates: string[] }> {
 return await withServerRunBracket(ctx, {
+planSetId: args.planSetId,
 kind: "ai_call",
 phase: "drafting",
 label: "施設辞書への保存",
@@ -20078,6 +20116,7 @@ saveAreaTravelTimes: defineAction({
 description:
 "Internal: registers typical walking minutes between park areas into the area-to-area travel matrix, from guide pages the calling task actually read (each entry carries its source title, URL and fetch date — values without a real source must not be registered). Minutes are stated at the 少しゆっくり (70 m/min) baseline. Registering an existing pair replaces its value and provenance. Used by generation tasks for pairs their plans need that the matrix lacks, and by the one-time initial survey.",
 request: z.object({
+planSetId: z.number().int().positive().optional(),
 entries: z
 .array(
 z.object({
@@ -20095,6 +20134,7 @@ fetchedAt: z.string().max(40).nullable().optional(),
 response: z.object({ ok: z.literal(true), saved: z.number()}),
 async handler(ctx, args): Promise<{ ok: true; saved: number}> {
 return await withServerRunBracket(ctx, {
+planSetId: args.planSetId,
 kind: "ai_call",
 phase: "drafting",
 label: "エリア間移動時間の登録",
