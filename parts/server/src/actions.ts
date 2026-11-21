@@ -1120,6 +1120,7 @@ const RESTAURANT_REQUIRED_EVIDENCE_MARKERS = [
 "予約が必要",
 "事前予約が必要",
 "ご予約が必要",
+"予約が必須",
 ];
 const RESTAURANT_PS_EVIDENCE_MARKERS = ["プライオリティ・シーティング"];
 const RESTAURANT_MOBILE_AVAILABLE_EVIDENCE_MARKERS = ["モバイルオーダー対象"];
@@ -1145,6 +1146,7 @@ const RESTAURANT_RESERVATION_ABSENCE_MARKERS = [
 "事前予約",
 "ショーレストラン",
 "予約案内",
+"予約が必須",
 ];
 const RESTAURANT_MOBILE_ABSENCE_MARKERS = [
 "モバイルオーダー対象",
@@ -7370,11 +7372,16 @@ const itemRows = await db
 .from(schema.planItems)
 .where(eq(schema.planItems.planId, plan.id))
 .orderBy(asc(schema.planItems.sortOrder));
+// Purchase rows also carry their stored unit price and
+// purchaseCount (or the legacy no-count marker): the
+// replacement task must resubmit a count for every
+// purchase row, and an unchanged purchase keeps the
+// count it was stored with (record CK).
 const currentPlanText = [
 `プラン${slot}「${plan.title}」（概算費用: ${plan.estimatedCostJpy != null? `約${plan.estimatedCostJpy.toLocaleString("ja-JP")}円`: "未記録"}）:`,
 ...itemRows.map(
 (it) =>
-`- ${it.timeLabel?? "時刻なし"} ${it.name}（${it.kind}）${it.area? ` エリア: ${it.area}`: ""}${it.passType? ` パス: ${it.passType}`: ""}${it.estWaitMin != null? ` 推定待ち約${it.estWaitMin}分`: ""}${it.lat != null && it.lng != null? ` 座標: ${it.lat}, ${it.lng}`: ""}${it.officialUrl? ` 公式URL: ${it.officialUrl}`: ""}${it.unconfirmedReason? ` 未確定（${it.unconfirmedReason}）`: ""}`,
+`- ${it.timeLabel?? "時刻なし"} ${it.name}（${it.kind}）${it.area? ` エリア: ${it.area}`: ""}${it.passType? ` パス: ${it.passType}`: ""}${it.estWaitMin != null? ` 推定待ち約${it.estWaitMin}分`: ""}${it.lat != null && it.lng != null? ` 座標: ${it.lat}, ${it.lng}`: ""}${it.officialUrl? ` 公式URL: ${it.officialUrl}`: ""}${it.kind === "purchase" && it.unitPriceJpy != null? ` 単価: ${it.unitPriceJpy.toLocaleString("ja-JP")}円`: ""}${it.kind === "purchase"? (it.purchaseCount != null? ` 対象人数: ${it.purchaseCount}名`: " 対象人数: なし（旧形式）"): ""}${it.unconfirmedReason? ` 未確定（${it.unconfirmedReason}）`: ""}`,
 ),
 ].join("\n");
 // The replacement runs for the SET's park and visit date (the plan
@@ -8241,7 +8248,7 @@ return spawnOutcome !== "exhausted";
 type StoredPlanForCheck = {
 slot: "A" | "B" | "C";
 estimatedCostJpy: number | null;
-costBreakdown: { label: string; amountJpy: number | null }[];
+costBreakdown: { label: string; amountJpy: number | null; note?: string | null }[];
 items: {
 name: string;
 kind: string;
@@ -8277,7 +8284,18 @@ parkHours: string | null;
 // saveSourceSnapshots + saveNormalizedFacts). Null when the task
 // could not build one — every DPA judgement then stays 未確認.
 factBuildId: number | null;
-closedFacilities: string[];
+// The confirmed closure list for the visit date, or null when
+// the task could not confirm the list at all (record CN,
+// weakness 1): null is NOT an empty confirmed list -- the
+// closure check then stays unverified and judges nothing.
+closedFacilities: string[] | null;
+// The fresh official 1-day passport unit prices this run
+// fetched (record CN, weakness 2), in the same shape the
+// save paths carry, or null when the run submitted none.
+// checkStoredPlans machine-checks the claimed prices
+// against the stored ticket_prices snapshot text before
+// any ticket judgement runs on them.
+ticketPrices: TicketPricesInput | null;
 showTimes: { name: string; times: string[] }[];
 unverified: string[];
 };
@@ -8392,8 +8410,19 @@ pushProblem(
 );
 }
 
+// Closures (record CN, weakness 1): a null list means the task
+// could not confirm the closure list -- the check stays
+// unverified (fact origin, like park hours) and no row is
+// judged against a list that was never confirmed. An array
+// (possibly empty) is a confirmed list and judges as before.
+if (fresh.closedFacilities == null) {
+const closuresUnverifiedEntry =
+"休止情報：未確認（今回の取得データから対象日の休止一覧を確認できなかったため）";
+pushUnverified(closuresUnverifiedEntry);
+pushFactUnverified(closuresUnverifiedEntry);
+}
 const closedKeys = new Set(
-fresh.closedFacilities.map((n) => facilityNameKey(n)),
+(fresh.closedFacilities ?? []).map((n) => facilityNameKey(n)),
 );
 const showTimesByKey = new Map(
 fresh.showTimes.map(
@@ -8706,6 +8735,114 @@ pushProblem(
 );
 }
 }
+}
+}
+// Ticket unit prices (record CN, weakness 2): the fresh prices
+// the task submitted are first tied to the stored ticket_prices
+// snapshot text of this set's park (the same priceAppearsInText
+// rule as the class-11 cost floor). A run that submitted no
+// prices, or prices the snapshot text cannot tie down, leaves
+// the ticket check unverified (fact origin) -- no judgement runs
+// on ungrounded prices. Verified prices are then compared
+// against each plan's ticket line: the creation baseline is the
+// creation line's OWN note (the unit price x count pairs it
+// recorded), so the counting is the creation line's counting
+// (a child counted as 0 at creation, e.g. under 3 and free,
+// stays 0 here). A plan whose note carries no parseable pair
+// has no baseline and claims nothing; if NO plan has one, the
+// price-change judgement itself stays unverified.
+let ticketFresh: { adultJpy: number; childJpy: number | null } | null =
+null;
+if (!fresh.ticketPrices) {
+const ticketUnverifiedEntry =
+"チケット単価：未確認（今回の提出にチケット単価（ticketPrices）が含まれていないため）";
+pushUnverified(ticketUnverifiedEntry);
+pushFactUnverified(ticketUnverifiedEntry);
+} else {
+const db = ctx.db<typeof schema>();
+const snapRows = await db
+.select()
+.from(schema.sourceSnapshots)
+.where(eq(schema.sourceSnapshots.id, fresh.ticketPrices.snapshotId))
+.limit(1);
+const snap = snapRows[0];
+if (!snap || snap.kind !== "ticket_prices" || snap.park !== set.park) {
+const ticketUnverifiedEntry =
+`チケット単価：未確認（チケット単価の根拠スナップショット（id=${fresh.ticketPrices.snapshotId}）が、このパークのチケット価格スナップショットとして確認できなかったため）`;
+pushUnverified(ticketUnverifiedEntry);
+pushFactUnverified(ticketUnverifiedEntry);
+} else if (
+!priceAppearsInText(fresh.ticketPrices.adultJpy, snap.rawText) ||
+(fresh.ticketPrices.childJpy != null &&
+!priceAppearsInText(fresh.ticketPrices.childJpy, snap.rawText))
+) {
+const ticketUnverifiedEntry =
+"チケット単価：未確認（申告されたチケット単価が、根拠スナップショットの本文に確認できなかったため）";
+pushUnverified(ticketUnverifiedEntry);
+pushFactUnverified(ticketUnverifiedEntry);
+} else {
+ticketFresh = {
+adultJpy: fresh.ticketPrices.adultJpy,
+childJpy: fresh.ticketPrices.childJpy ?? null,
+};
+}
+}
+if (ticketFresh) {
+let ticketBaselineSeen = false;
+const ticketPair = (
+note: string | null | undefined,
+label: string,
+): { price: number; count: number } | null => {
+if (!note) return null;
+const m = new RegExp(
+`${label}.*?([0-9][0-9,]*)円\\s*[×x]\\s*(\\d+)`,
+).exec(note);
+if (!m) return null;
+return {
+price: Number((m[1] ?? "0").replace(/,/g, "")),
+count: Number(m[2] ?? "0"),
+};
+};
+for (const plan of plansData) {
+for (const line of plan.costBreakdown) {
+if (!TICKET_LINE_RE.test(line.label)) continue;
+if (line.amountJpy == null) continue;
+const adultPair = ticketPair(line.note, "大人");
+if (!adultPair) continue;
+ticketBaselineSeen = true;
+const childPair = ticketPair(line.note, "小人");
+const expectedLine =
+ticketFresh.adultJpy * adultPair.count +
+(childPair && ticketFresh.childJpy != null
+? ticketFresh.childJpy * childPair.count
+: 0);
+if (expectedLine !== line.amountJpy) {
+const changes: string[] = [];
+if (ticketFresh.adultJpy !== adultPair.price) {
+changes.push(
+`大人単価が変わりました（作成時 ${adultPair.price.toLocaleString("ja-JP")}円 → 現在 ${ticketFresh.adultJpy.toLocaleString("ja-JP")}円）`,
+);
+}
+if (
+childPair &&
+ticketFresh.childJpy != null &&
+ticketFresh.childJpy !== childPair.price
+) {
+changes.push(
+`小人単価が変わりました（作成時 ${childPair.price.toLocaleString("ja-JP")}円 → 現在 ${ticketFresh.childJpy.toLocaleString("ja-JP")}円）`,
+);
+}
+pushProblem(
+`プラン${plan.slot}：チケット代の内訳（${line.amountJpy.toLocaleString("ja-JP")}円）が、今回の公式チケット単価で計算し直した金額（${expectedLine.toLocaleString("ja-JP")}円）と一致しません${changes.length > 0 ? `（${changes.join("。")}）` : ""}`,
+);
+}
+}
+}
+if (!ticketBaselineSeen) {
+const ticketUnverifiedEntry =
+"チケット単価の変更：未確認（作成時の費用内訳のチケット行の注記から、作成時の単価と人数を読み取れなかったため）";
+pushUnverified(ticketUnverifiedEntry);
+pushFactUnverified(ticketUnverifiedEntry);
 }
 }
 return {
@@ -20921,7 +21058,7 @@ return { ok: true };
 
 savePlanVerification: defineAction({
 description:
-"Internal: called by the bulk re-verification task with the official data it re-fetched for the set's visit date. Re-runs the save-time deterministic checks (DPA eligibility/prices/application period judged ONLY by the fresh normalized-fact build named by factBuildId — built by the task from fresh source_snapshots via saveNormalizedFacts — with DPA cost recomputed per purchase instance, counted at purchase and never on usage rows, plus closures, park hours, show times, DPA purchase sequence, travel_min gap arithmetic, breakdown sums) against the STORED plans WITHOUT saving anything, compares against the creation-time verification record, posts the result to the TAB1 chat, appends the run to the set's re-verification history (with the facts and their grounds), and advances lastVerifiedAt. When the run finds mismatches against the current official data or leaves spec-related facts (DPA / facts / hours / show times) unconfirmed, the chat result and the history display also carry the repair guidance (the app's premises may no longer match Disney's current system; ask your own Muse in the main chat to fix the app) — the owner's rule that the guidance rides in the detection message itself. Plan rows, amounts, schedules and coordinates are never modified.",
+"Internal: called by the bulk re-verification task with the official data it re-fetched for the set's visit date. Re-runs the save-time deterministic checks (DPA eligibility/prices/application period judged ONLY by the fresh normalized-fact build named by factBuildId — built by the task from fresh source_snapshots via saveNormalizedFacts — with DPA cost recomputed per purchase instance, counted at purchase and never on usage rows, plus closures, park hours, show times, DPA purchase sequence, travel_min gap arithmetic, breakdown sums, plus the ticket unit prices submitted as ticketPrices (machine-checked against the stored ticket_prices snapshot text) against the stored plans' ticket lines; a null verification.closedFacilities means the closure list could not be confirmed, so the closure check stays unverified instead of judging against an empty list) against the STORED plans WITHOUT saving anything, compares against the creation-time verification record, posts the result to the TAB1 chat, appends the run to the set's re-verification history (with the facts and their grounds), and advances lastVerifiedAt. When the run finds mismatches against the current official data or leaves spec-related facts (DPA / facts / hours / show times) unconfirmed, the chat result and the history display also carry the repair guidance (the app's premises may no longer match Disney's current system; ask your own Muse in the main chat to fix the app) — the owner's rule that the guidance rides in the detection message itself. Plan rows, amounts, schedules and coordinates are never modified.",
 request: z.object({
 requestId: z.number(),
 planSetId: z.number(),
@@ -20930,6 +21067,11 @@ planSetId: z.number(),
 // then stays 未確認 instead of running on no grounds.
 factBuildId: z.number().nullable().optional(),
 parkHours: z.string().nullable().optional(),
+// The fresh ticket unit prices this run fetched (record CN,
+// weakness 2), same shape as the save paths. Optional for
+// compatibility: a submission without it leaves the ticket
+// check unverified instead of judging on no grounds.
+ticketPrices: ticketPricesShape.nullable().optional(),
 sources: z
 .array(z.object({ title: z.string(), url: z.string() }))
 .max(20)
@@ -20949,7 +21091,11 @@ entertainmentSource: z
 .nullable()
 .optional(),
 dpaSnapshotText: z.string().max(500000).nullable().optional(),
-closedFacilities: z.array(z.string().max(200)).max(120).default([]),
+closedFacilities: z
+.array(z.string().max(200))
+.max(120)
+.nullable()
+.default([]),
 showTimes: z
 .array(
 z.object({
@@ -21009,7 +21155,7 @@ const parsed: unknown = JSON.parse(plan.costBreakdownJson);
 if (Array.isArray(parsed)) {
 costBreakdown = parsed
 .filter(
-(l): l is { label: string; amountJpy?: unknown } =>
+(l): l is { label: string; amountJpy?: unknown; note?: unknown } =>
 typeof l === "object" &&
 l !== null &&
 typeof (l as { label?: unknown }).label === "string",
@@ -21018,6 +21164,10 @@ typeof (l as { label?: unknown }).label === "string",
 label: l.label,
 amountJpy:
 typeof l.amountJpy === "number" ? l.amountJpy : null,
+note:
+typeof (l as { note?: unknown }).note === "string"
+? ((l as { note?: unknown }).note as string)
+: null,
 }));
 }
 } catch {
@@ -21056,6 +21206,7 @@ plansData,
 parkHours: args.parkHours ?? null,
 factBuildId: args.factBuildId ?? null,
 closedFacilities: v.closedFacilities,
+ticketPrices: args.ticketPrices ?? null,
 showTimes: v.showTimes,
 unverified: v.unverified,
 },
