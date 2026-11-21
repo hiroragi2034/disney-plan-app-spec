@@ -31,6 +31,7 @@ import {
   type PromptBundle,
 } from "./prompts/loader";
 import { FACILITY_SEED, FACILITY_SEED_STAMP_MS } from "./facility_seed";
+import { RESTAURANT_FACT_SEED, RESTAURANT_SNAPSHOT_SEED } from "./restaurant_fact_seed";
 import { WAIT_TIME_SEED } from "./wait_time_seed";
 import { TRAVEL_TIME_SEED } from "./travel_time_seed";
 
@@ -1092,12 +1093,16 @@ function sanitizeAnnouncementHtml(html: string): string {
 // Coordinates have NO TTL: once resolved they are reused forever (a
 // facility's position does not move), so the first fetch is the only
 // one ever paid. Static attributes (area / official URL / official
-// duration) and intro photos change rarely, so they carry a long TTL
-// and are re-fetched only after it lapses. Date-dependent facts (park
-// hours, closures, show times) are never in the dictionary at all, and
-// wait-time estimation material is re-fetched on every generation.
+// duration) change rarely, so they carry a long TTL and are
+// re-fetched only after it lapses. Intro photos carry NO TTL at all
+// (record DE): a photo is fetched at most once per facility — which
+// photo it is was determined once (for the 68 bundled facilities, by
+// the distributor; the recorded URL is the seed's imageUrl) and its
+// bytes are downloaded once and reused from the dictionary forever
+// after. Date-dependent facts (park hours, closures, show times)
+// are never in the dictionary at all, and wait-time estimation
+// material is re-fetched on every generation.
 const STATIC_ATTR_TTL_MS = 180 * 24 * 60 * 60 * 1000;
-const IMAGE_TTL_MS = 180 * 24 * 60 * 60 * 1000;
 
 // ---------- restaurant fact layer （レストラン事実レイヤー) ----------
 //
@@ -2123,8 +2128,11 @@ return cache.get(key) ?? null;
 }
 
 // Per-group freshness of one dictionary row. Coordinates are usable
-// whenever present (no expiry); static attributes and the photo are
-// fresh only within their TTL of the group's last fetch.
+// whenever present (no expiry); static attributes are fresh only
+// within their TTL of the group's last fetch; the photo flag is not
+// a freshness judgement at all (record DE): it reports whether the
+// dictionary holds the facility's photo bytes, which — once fetched
+// — are reused forever with no expiry.
 function facilityFreshness(
 row: FacilityRow,
 now: number,
@@ -2134,10 +2142,7 @@ coordsUsable: row.lat != null && row.lng != null,
 staticFresh:
 row.staticFetchedAt != null &&
 now - row.staticFetchedAt.getTime() <= STATIC_ATTR_TTL_MS,
-imageFresh:
-row.imageBlobKey != null &&
-row.imageFetchedAt != null &&
-now - row.imageFetchedAt.getTime() <= IMAGE_TTL_MS,
+imageFresh: row.imageBlobKey != null,
 };
 }
 
@@ -5526,6 +5531,43 @@ const key = await storeItemImage(ctx, keyPrefix, fallbackUrl);
 if (key) return { key, source: "reference"};
 }
 return null;
+}
+
+// Record DE: downloads the bytes of a facility's RECORDED photo URL
+// (facilities.imageUrl — determined once, for the bundled facilities
+// by the distributor) exactly once and records them as the
+// dictionary's photo for that facility. Called only when the
+// dictionary holds a recorded URL but no bytes yet. Returns null on
+// any failure: the facility's photo stays determined, the download
+// is retried from the same recorded URL the next time
+// collectMissingItemImages runs, and the facility is never handed
+// to the AI image-fetch task (which determines photos — already
+// done for this facility).
+async function fetchRecordedFacilityPhoto(
+ctx: Ctx,
+park: "land" | "sea",
+dict: FacilityRow,
+): Promise<{ key: string; source: "official" | "reference"} | null> {
+if (!dict.imageUrl || dict.imageBlobKey) return null;
+const source = dict.imageSource ?? "official";
+const stored = await storeItemImageWithFallback(
+ctx,
+`facilities/${park}/${encodeURIComponent(dict.nameKey)}`,
+source === "official" ? dict.imageUrl : null,
+source === "reference" ? dict.imageUrl : null,
+);
+if (!stored) return null;
+const db = ctx.db<typeof schema>();
+await db
+.update(schema.facilities)
+.set({
+imageBlobKey: stored.key,
+imageSource: stored.source,
+imageFetchedAt: new Date(),
+updatedAt: new Date(),
+})
+.where(eq(schema.facilities.id, dict.id));
+return stored;
 }
 
 function buildImageAssignment(
@@ -11510,11 +11552,21 @@ return false;
 }
 
 // Computes which of a finished set's schedule items still need
-// the image-fetch task (no photo and/or no official detail-page
-// link), applying everything that needs no task first: a fresh
-// dictionary photo / recorded official URL, and a photo another
-// finished set of the same park already owns. Shared by
-// requestItemImages (the button) and the task manager's retry
+// the image-fetch task, applying everything that needs no task
+// first. Record DE (photo fetched at most once): the task's
+// targets are ONLY facilities that have no photo anywhere — not in
+// the facility dictionary (neither stored bytes nor a recorded
+// URL) and not on any existing plan row. A dictionary photo is
+// applied directly with no task: stored bytes as they are (no
+// expiry), and a recorded URL's bytes are downloaded once here on
+// the server (fetchRecordedFacilityPhoto); when that download
+// fails the facility is still NOT a task target — its photo is
+// already determined, and the download is retried from the same
+// recorded URL the next time this function runs. A photo another
+// finished set of the same park already owns is carried over
+// directly (carry-over is reuse, not a fetch). Shared by
+// requestItemImages (the button), the automatic start at plan
+// creation (autoStartItemImages), and the task manager's retry
 // (which recomputes the remainder for the SAME set).
 async function collectMissingItemImages(
 ctx: Ctx,
@@ -11527,6 +11579,12 @@ const planRows = await db
 .where(eq(schema.plans.planSetId, set.id));
 const missing: { id: number; name: string; kind: string }[] = [];
 const seenNames = new Set<string>();
+// A recorded URL's download is attempted once per facility within
+// this call, however many rows name the facility.
+const recordedFetch = new Map<
+string,
+{ key: string; source: "official" | "reference"} | null
+>();
 for (const plan of planRows) {
 const itemRows = await db
 .select()
@@ -11534,9 +11592,6 @@ const itemRows = await db
 .where(eq(schema.planItems.planId, plan.id))
 .orderBy(asc(schema.planItems.sortOrder));
 for (const it of itemRows) {
-// An item needs the fetch task when it still lacks a photo OR its
-// official detail-page link (the same task confirms both).
-if (it.imageBlobKey && it.officialUrl) continue;
 if (
 it.kind !== "attraction" &&
 it.kind !== "show" &&
@@ -11545,17 +11600,12 @@ it.kind !== "restaurant"
 ) {
 continue;
 }
-// Facility dictionary first: a fresh dictionary photo and/or the
-// recorded official URL are applied directly, with no fetch task
-// at all. Only what the dictionary cannot cover goes to the task.
+// A row that already carries a photo is never a target.
+if (it.imageBlobKey) continue;
 const dict = await findFacility(ctx, set.park, it.name);
+let recordedFailed = false;
 if (dict) {
-if (
-!it.imageBlobKey &&
-dict.imageBlobKey &&
-dict.imageSource &&
-facilityFreshness(dict, Date.now()).imageFresh
-) {
+if (dict.imageBlobKey && dict.imageSource) {
 await db
 .update(schema.planItems)
 .set({
@@ -11564,6 +11614,22 @@ imageSource: dict.imageSource,
 })
 .where(eq(schema.planItems.id, it.id));
 it.imageBlobKey = dict.imageBlobKey;
+} else if (dict.imageUrl) {
+const dkey = facilityNameKey(it.name);
+let stored = recordedFetch.get(dkey);
+if (stored === undefined) {
+stored = await fetchRecordedFacilityPhoto(ctx, set.park, dict);
+recordedFetch.set(dkey, stored);
+}
+if (stored) {
+await db
+.update(schema.planItems)
+.set({ imageBlobKey: stored.key, imageSource: stored.source })
+.where(eq(schema.planItems.id, it.id));
+it.imageBlobKey = stored.key;
+} else {
+recordedFailed = true;
+}
 }
 if (!it.officialUrl && dict.officialUrl) {
 await db
@@ -11572,13 +11638,12 @@ await db
 .where(eq(schema.planItems.id, it.id));
 it.officialUrl = dict.officialUrl;
 }
-if (it.imageBlobKey && it.officialUrl) continue;
 }
+if (it.imageBlobKey) continue;
 // Same carry-over as at save time: another finished plan set of
 // this park may already own this facility's photo (the typical
 // case is a rebuild whose original set has the photos while the
 // dictionary does not). Apply it directly, with no fetch task.
-if (!it.imageBlobKey) {
 const owned = await findOwnedFacilityPhoto(
 ctx,
 set.park,
@@ -11596,16 +11661,47 @@ name: it.name,
 image: { blobKey: owned.key, source: owned.source },
 });
 }
-}
-if (it.imageBlobKey && it.officialUrl) continue;
+if (it.imageBlobKey) continue;
+// The recorded URL's download failed above: the photo is already
+// determined, so this facility never becomes a task target.
+if (recordedFailed) continue;
 // The same facility can appear in several plans; fetch it once and
 // share the blob with every row of that name in this set.
-if (seenNames.has(it.name)) continue;
-seenNames.add(it.name);
+const skey = facilityNameKey(it.name);
+if (seenNames.has(skey)) continue;
+seenNames.add(skey);
 missing.push({ id: it.id, name: it.name, kind: it.kind });
 }
 }
 return missing;
+}
+
+// Record DE: at plan creation, the image-fetch task starts
+// AUTOMATICALLY for the facilities that still have no photo
+// anywhere — the same route as the requestItemImages button
+// (collectMissingItemImages, then the task manager). Starting
+// never blocks or fails the save that calls this: the fetch runs
+// as a background task while the saved plans are already usable,
+// and every failure of the start itself is swallowed here (the
+// on-demand requestItemImages route stays available).
+async function autoStartItemImages(ctx: Ctx, planSetId: number): Promise<void> {
+try {
+const db = ctx.db<typeof schema>();
+const setRows = await db
+.select()
+.from(schema.planSets)
+.where(eq(schema.planSets.id, planSetId))
+.limit(1);
+const set = setRows[0];
+if (!set || set.status !== "done") return;
+if (set.imagesStatus === "fetching") return;
+const missing = await collectMissingItemImages(ctx, set);
+if (missing.length === 0) return;
+await spawnItemImagesAttempt(ctx, set, missing);
+} catch {
+// The save that triggered this has already succeeded; a failed
+// start must never turn it into a failure.
+}
 }
 
 // Spawns the image-fetch task for a set's missing items, through
@@ -11972,11 +12068,13 @@ async function collectInitialStateChecks(
       let durationCount = 0;
       let staticCount = 0;
       let photoCount = 0;
+      let recordedCount = 0;
       for (const r of rows) {
         if (r.officialUrl) urlCount += 1;
         if (r.durationMin != null) durationCount += 1;
         if (r.staticFetchedAt) staticCount += 1;
         if (r.imageBlobKey) photoCount += 1;
+        if (r.imageUrl) recordedCount += 1;
       }
       for (const f of FACILITY_SEED) {
         const r = byKey.get(`${f.park}:${f.nameKey}`);
@@ -12008,14 +12106,20 @@ async function collectInitialStateChecks(
         ) {
           problems.push(`static-group stamp differs: ${f.park}/${f.name}`);
         }
+        if ((r.imageUrl ?? null) !== (f.imageUrl ?? null)) {
+          problems.push(`recorded photo URL differs: ${f.park}/${f.name}`);
+        }
+        if ((r.imageSource ?? null) !== (f.imageSource ?? null)) {
+          problems.push(`recorded photo kind differs: ${f.park}/${f.name}`);
+        }
         if (r.imageBlobKey != null) {
-          problems.push(`photo present (photos are not bundled): ${f.park}/${f.name}`);
+          problems.push(`photo bytes present (photo bytes are not bundled): ${f.park}/${f.name}`);
         }
       }
       return problems.length === 0
         ? {
             ok: true,
-            detail: `facilities: ${rows.length} rows, every row equal to the bundled seed (officialUrl on ${urlCount}, durationMin on ${durationCount}, static group fetched on ${staticCount}, photos ${photoCount})`,
+            detail: `facilities: ${rows.length} rows, every row equal to the bundled seed (officialUrl on ${urlCount}, durationMin on ${durationCount}, static group fetched on ${staticCount}, photo bytes ${photoCount}, recorded photo URLs on ${recordedCount})`,
           }
         : { ok: false, detail: `facilities: ${summarizeProblems(problems)}` };
     }),
@@ -12145,31 +12249,95 @@ async function collectInitialStateChecks(
 
   checks.push(
     await runInitialStateCheck("sourceLayerEmpty", async () => {
-      const snapshots = await db
-        .select({ id: schema.sourceSnapshots.id })
-        .from(schema.sourceSnapshots);
+      const snapshots = await db.select().from(schema.sourceSnapshots);
       const facts = await db
         .select({ id: schema.normalizedFacts.id })
         .from(schema.normalizedFacts);
       const builds = await db
         .select({ id: schema.factBuilds.id })
         .from(schema.factBuilds);
-      const restaurant = await db
-        .select({ id: schema.restaurantFacts.id })
-        .from(schema.restaurantFacts);
+      const restaurant = await db.select().from(schema.restaurantFacts);
       const research = await db
         .select({ id: schema.researchRequests.id })
         .from(schema.researchRequests);
-      const ok =
-        snapshots.length === 0 &&
-        facts.length === 0 &&
-        builds.length === 0 &&
-        restaurant.length === 0 &&
-        research.length === 0;
-      return {
-        ok,
-        detail: `source_snapshots: ${snapshots.length}, normalized_facts: ${facts.length}, fact_builds: ${builds.length}, restaurant_facts: ${restaurant.length}, research_requests: ${research.length} (expected all 0)`,
-      };
+      const problems: string[] = [];
+      if (facts.length !== 0) {
+        problems.push(`normalized_facts: ${facts.length} (expected 0)`);
+      }
+      if (builds.length !== 0) {
+        problems.push(`fact_builds: ${builds.length} (expected 0)`);
+      }
+      if (research.length !== 0) {
+        problems.push(`research_requests: ${research.length} (expected 0)`);
+      }
+      // Record DF: the initial state DOES hold the bundled
+      // restaurant snapshots and facts — 12 of each, matched by
+      // URL + fetched_at (snapshots) and by facility + values +
+      // registeredAt (facts), with every fact citing its bundled
+      // snapshot.
+      if (snapshots.length !== RESTAURANT_SNAPSHOT_SEED.length) {
+        problems.push(
+          `source_snapshots: ${snapshots.length} (expected ${RESTAURANT_SNAPSHOT_SEED.length} bundled rows)`,
+        );
+      }
+      const snapByPair = new Map(
+        snapshots.map(
+          (s) => [`${s.url}:${s.fetchedAt?.getTime() ?? NaN}`, s] as const,
+        ),
+      );
+      for (const s of RESTAURANT_SNAPSHOT_SEED) {
+        if (!snapByPair.has(`${s.url}:${s.fetchedAtMs}`)) {
+          problems.push(`missing bundled snapshot: ${s.url}`);
+        }
+      }
+      if (restaurant.length !== RESTAURANT_FACT_SEED.length) {
+        problems.push(
+          `restaurant_facts: ${restaurant.length} (expected ${RESTAURANT_FACT_SEED.length} bundled rows)`,
+        );
+      }
+      const factPool = new Map<string, (typeof restaurant)[number][]>();
+      for (const r of restaurant) {
+        const k = `${r.park}:${r.nameKey}:${r.createdAt?.getTime() ?? NaN}`;
+        factPool.set(k, [...(factPool.get(k) ?? []), r]);
+      }
+      for (const f of RESTAURANT_FACT_SEED) {
+        const k = `${f.park}:${f.nameKey}:${f.registeredAtMs}`;
+        const list = factPool.get(k) ?? [];
+        const r = list[0];
+        if (!r) {
+          problems.push(`missing bundled fact: ${f.park}/${f.name}`);
+          continue;
+        }
+        list.shift();
+        if (
+          r.name !== f.name ||
+          r.serviceType !== f.serviceType ||
+          r.reservationType !== f.reservationType ||
+          r.mobileOrder !== f.mobileOrder
+        ) {
+          problems.push(`bundled fact values differ: ${f.park}/${f.name}`);
+        }
+        const seedSnap = RESTAURANT_SNAPSHOT_SEED.find(
+          (s) => s.key === f.snapshotKey,
+        );
+        const cited = snapshots.find((s) => s.id === r.snapshotId);
+        if (
+          !seedSnap ||
+          !cited ||
+          cited.url !== seedSnap.url ||
+          cited.fetchedAt?.getTime() !== seedSnap.fetchedAtMs
+        ) {
+          problems.push(
+            `bundled fact snapshot reference differs: ${f.park}/${f.name}`,
+          );
+        }
+      }
+      return problems.length === 0
+        ? {
+            ok: true,
+            detail: `source_snapshots: ${snapshots.length} bundled restaurant_detail rows, normalized_facts: 0, fact_builds: 0, restaurant_facts: ${restaurant.length} bundled rows citing the bundled snapshots, research_requests: 0`,
+          }
+        : { ok: false, detail: `source layer: ${summarizeProblems(problems)}` };
     }),
   );
 
@@ -18303,9 +18471,12 @@ await upsertFacilityFromFetch(ctx, set.park, rec);
 
 // Intro photos, one download per FACILITY (not per row): the same
 // facility appearing in plans A/B/C shares a single download and a
-// single blob. A facility whose dictionary photo is still fresh
-// reuses the dictionary blob with no download at all. Downloads
-// happen after every row is inserted, grouped by facility.
+// single blob. A facility whose photo the dictionary already holds
+// reuses the dictionary blob with no download at all (record DE: a
+// photo is fetched at most once — no expiry). A facility with a
+// recorded URL but no bytes yet gets its one download from that
+// recorded URL here on the server. Downloads happen after every
+// row is inserted, grouped by facility.
 const photoGroups = new Map<string, SavedItem[]>();
 for (const si of savedItems) {
 const key = facilityNameKey(si.name);
@@ -18320,12 +18491,7 @@ if (!first) continue;
 const dict = await dictFor(first.name);
 let stored: { key: string; source: "official" | "reference"} | null =
 null;
-if (
-dict &&
-dict.imageBlobKey &&
-dict.imageSource &&
-facilityFreshness(dict, Date.now()).imageFresh
-) {
+if (dict && dict.imageBlobKey && dict.imageSource) {
 stored = { key: dict.imageBlobKey, source: dict.imageSource};
 } else {
 // Carry-over from an earlier plan set of the same park (e.g. the
@@ -18347,7 +18513,16 @@ image: { blobKey: owned.key, source: owned.source},
 });
 }
 }
-if (!stored) {
+if (!stored && dict && dict.imageUrl) {
+// Record DE: this facility's photo was already determined once
+// (the dictionary holds its recorded URL) — download the bytes
+// from that URL once, here on the server. On failure the facility
+// is NOT handed to the image-fetch task and no payload URL is
+// tried instead; collectMissingItemImages retries the same
+// recorded URL the next time it runs.
+stored = await fetchRecordedFacilityPhoto(ctx, set.park, dict);
+}
+if (!stored && !(dict && dict.imageUrl)) {
 const withUrl = group.find((g) => g.imageUrl || g.referenceUrl);
 if (withUrl) {
 stored = await storeItemImageWithFallback(
@@ -18480,6 +18655,12 @@ phase: "save_verify",
 label: "保存・検証の終了（savePlanSet）",
 });
 await closeOpenRunLog(ctx, args.planSetId, "succeeded", null, null, "finished");
+// Record DE: photo application for this set is done — start the
+// image-fetch task automatically for any facility that still has
+// no photo anywhere. The start is awaited only as a start (the
+// fetch itself runs in the background) and can never fail this
+// save (autoStartItemImages swallows its own failures).
+await autoStartItemImages(ctx, set.id);
 ctx.invalidateQueries();
 return { ok: true};
 },
@@ -19518,9 +19699,11 @@ for (const rec of fetchedByName.values()) {
 await upsertFacilityFromFetch(ctx, set.park, rec);
 }
 // Intro photos for the swapped plan's items, one download per
-// facility, with the same reuse order as savePlanSet (fresh
-// dictionary photo -> a photo the app already owns for the facility
-// in another set -> download).
+// facility, with the same reuse order as savePlanSet (dictionary
+// photo bytes -> a photo the app already owns for the facility in
+// another set -> the one download from the dictionary's recorded
+// URL -> a payload URL, the last only for facilities with no
+// recorded URL).
 const photoGroups = new Map<string, SavedItem[]>();
 for (const si of savedItems) {
 const key = facilityNameKey(si.name);
@@ -19534,12 +19717,7 @@ if (!first) continue;
 const dict = await dictFor(first.name);
 let stored: { key: string; source: "official" | "reference"} | null =
 null;
-if (
-dict &&
-dict.imageBlobKey &&
-dict.imageSource &&
-facilityFreshness(dict, Date.now()).imageFresh
-) {
+if (dict && dict.imageBlobKey && dict.imageSource) {
 stored = { key: dict.imageBlobKey, source: dict.imageSource};
 } else {
 const owned = await findOwnedFacilityPhoto(
@@ -19556,7 +19734,16 @@ image: { blobKey: owned.key, source: owned.source},
 });
 }
 }
-if (!stored) {
+if (!stored && dict && dict.imageUrl) {
+// Record DE: this facility's photo was already determined once
+// (the dictionary holds its recorded URL) — download the bytes
+// from that URL once, here on the server. On failure the facility
+// is NOT handed to the image-fetch task and no payload URL is
+// tried instead; collectMissingItemImages retries the same
+// recorded URL the next time it runs.
+stored = await fetchRecordedFacilityPhoto(ctx, set.park, dict);
+}
+if (!stored && !(dict && dict.imageUrl)) {
 const withUrl = group.find((g) => g.imageUrl || g.referenceUrl);
 if (withUrl) {
 stored = await storeItemImageWithFallback(
@@ -19826,6 +20013,10 @@ label: "保存・検証の終了（savePlanReplacement）",
 slot,
 );
 await closeOpenRunLog(ctx, set.id, "succeeded", null, slot, "finished");
+// Record DE: the swapped plan's photo application is done — the
+// same automatic start as savePlanSet, over the whole set (the
+// image fetch is a set-level route, as with requestItemImages).
+await autoStartItemImages(ctx, set.id);
 ctx.invalidateQueries();
 return { ok: true};
 },
@@ -19884,7 +20075,7 @@ return { ok: true};
 
 getFacilityDictionary: defineAction({
 description:
-"Internal: returns the facility dictionary （施設辞書） for one park — the static facility attributes fetched at runtime so far (area, official URL, official duration, coordinates, photo presence) with per-group freshness flags, plus each restaurant's CURRENT FACT (restaurantFact: the grounded classification from the restaurant fact layer — serviceType / reservationType / mobileOrder / registeredAt — or null when no valid fact is registered). Coordinates are usable whenever present (no expiry); static attributes and photos are fresh only within their TTL. The generation task reads this first and re-fetches only what is missing or stale — a restaurant whose restaurantFact is null needs its official detail page fetched and a fact registered via saveRestaurantFacts even when its other static attributes are fresh. The bare reservationType / mobileOrder fields are the dictionary's LEGACY classification columns, retained for history only: they are NOT the classification source anymore and must never be used for a plan decision or a display.",
+"Internal: returns the facility dictionary （施設辞書） for one park — the static facility attributes fetched at runtime so far (area, official URL, official duration, coordinates, photo presence) with per-group freshness flags, plus each restaurant's CURRENT FACT (restaurantFact: the grounded classification from the restaurant fact layer — serviceType / reservationType / mobileOrder / registeredAt — or null when no valid fact is registered). Coordinates are usable whenever present (no expiry); static attributes are fresh only within their TTL; a photo, once fetched, is never fetched again (record DE — it has no expiry): imageFresh reports whether the dictionary holds the photo bytes, and imageRecorded reports whether the dictionary holds a photo at all (stored bytes, or a recorded photo URL whose bytes the server downloads once) — a facility with imageRecorded=true never needs its photo determined or fetched by a task. The generation task reads this first and re-fetches only what is missing or stale — a restaurant whose restaurantFact is null needs its official detail page fetched and a fact registered via saveRestaurantFacts even when its other static attributes are fresh. The bare reservationType / mobileOrder fields are the dictionary's LEGACY classification columns, retained for history only: they are NOT the classification source anymore and must never be used for a plan decision or a display.",
 request: z.object({ park: parkEnum, planSetId: z.number().int().positive().optional(), }),
 response: z.object({
 entries: z.array(
@@ -19912,6 +20103,7 @@ imageSource: z.enum(["official", "reference"]).nullable(),
 coordsUsable: z.boolean(),
 staticFresh: z.boolean(),
 imageFresh: z.boolean(),
+imageRecorded: z.boolean(),
 }),
 ),
 }),
@@ -19952,6 +20144,7 @@ imageSource: "official" | "reference" | null;
 coordsUsable: boolean;
 staticFresh: boolean;
 imageFresh: boolean;
+imageRecorded: boolean;
 }[] = [];
 for (const r of rows) {
 const fresh = facilityFreshness(r, now);
@@ -19978,6 +20171,7 @@ imageSource: r.imageBlobKey? r.imageSource: null,
 coordsUsable: fresh.coordsUsable,
 staticFresh: fresh.staticFresh,
 imageFresh: fresh.imageFresh,
+imageRecorded: r.imageBlobKey != null || r.imageUrl != null,
 });
 }
 return { entries };
@@ -21637,7 +21831,7 @@ return { ok: true};
 
 resetUserData: defineAction({
 description:
-"Deletes ALL user data and returns the app to its initial state (spec §24): the AI chat log (messages), the プラン作成 conditions row, every plan set with its plans and schedule items, the facility dictionary (restored to the §24 seed: the 75 verified entries of data/facility-coordinates.json, coordinates plus the bundled static attributes — officialUrl on 58 entries, durationMin on 28, the static group marked fetched on 71; photos are not bundled), the area travel-time matrix (restored to the §24 seed: the 22 entries of data/area-travel-times.json, the initial values migration 0020 registered, each with its guide source — record CY; rows accumulated in use are reverted), the normalized-source layer (source snapshots, normalized facts, fact builds, restaurant facts), research requests, and the pending-request trackers tied to deleted data (verification requests, wait-time-source update requests), and the wait-time reference list (wait_time_sources, restored to the bundled §11 seed: the candidate set registered in the production app — record CV; rows added or removed in use are reverted). What stays: the four fixed tabs (they are app structure, not data), the saved announcement (announcement — distribution-channel state that doubles as the read record, spec §22.1), and the app constants (e.g. SHARE_NOTE_URL, ANNOUNCE_URL). Photo blobs belonging to deleted rows are left unreferenced in blob storage; nothing reads them once their rows are gone.",
+"Deletes ALL user data and returns the app to its initial state (spec §24): the AI chat log (messages), the プラン作成 conditions row, every plan set with its plans and schedule items, the facility dictionary (restored to the §24 seed: the 75 verified entries of data/facility-coordinates.json, coordinates plus the bundled static attributes — officialUrl on 58 entries, durationMin on 28, the static group marked fetched on 71; plus the recorded photo URLs of data/facility-photos.json on 68 entries, record DE — URLs only, no photo bytes), the bundled restaurant facts (record DF: the 12 restaurant_detail snapshots and 12 grounded facts of data/restaurant-facts.json, restored into source_snapshots / restaurant_facts with each fact citing its bundled snapshot and keeping its original registeredAt), the area travel-time matrix (restored to the §24 seed: the 22 entries of data/area-travel-times.json, the initial values migration 0020 registered, each with its guide source — record CY; rows accumulated in use are reverted), the normalized-source layer (normalized facts and fact builds emptied; source snapshots and restaurant facts restored to the record-DF seed above), research requests, and the pending-request trackers tied to deleted data (verification requests, wait-time-source update requests), and the wait-time reference list (wait_time_sources, restored to the bundled §11 seed: the candidate set registered in the production app — record CV; rows added or removed in use are reverted). What stays: the four fixed tabs (they are app structure, not data), the saved announcement (announcement — distribution-channel state that doubles as the read record, spec §22.1), and the app constants (e.g. SHARE_NOTE_URL, ANNOUNCE_URL). Photo blobs belonging to deleted rows are left unreferenced in blob storage; nothing reads them once their rows are gone.",
 request: z.object({}),
 response: z.object({ ok: z.literal(true) }),
 async handler(ctx): Promise<{ ok: true }> {
@@ -21672,6 +21866,8 @@ name: f.name,
 area: f.area,
 officialUrl: f.officialUrl ?? null,
 durationMin: f.durationMin ?? null,
+imageUrl: f.imageUrl ?? null,
+imageSource: f.imageSource ?? null,
 lat: f.lat,
 lng: f.lng,
 coordsFetchedAt: seedStamp,
@@ -21680,6 +21876,60 @@ createdAt: seedStamp,
 updatedAt: seedStamp,
 })),
 );
+// §24 initial state (record DF): the acquisition layer is not
+// empty after a reset either — it holds exactly the bundled
+// restaurant snapshots and facts (data/restaurant-facts.json),
+// each fact citing the bundled snapshot inserted just above it
+// and keeping its original registeredAt as its created_at, so
+// the 180-day validity judgement runs from the original
+// registration instant.
+const snapshotIdsByKey = new Map<string, number>();
+for (const s of RESTAURANT_SNAPSHOT_SEED) {
+const insertedSnap = await db
+.insert(schema.sourceSnapshots)
+.values({
+kind: s.kind,
+park: s.park,
+targetDate: s.targetDate,
+url: s.url,
+title: s.title,
+rawText: s.rawText,
+batchId: "bundled-restaurant-facts-df",
+fetchMethod: s.fetchMethod,
+canonical: s.canonical ? 1 : 0,
+completenessNote: s.completenessNote,
+fetchedAt: new Date(s.fetchedAtMs),
+})
+.returning({ id: schema.sourceSnapshots.id });
+const snapRow = insertedSnap[0];
+if (snapRow) snapshotIdsByKey.set(s.key, snapRow.id);
+}
+for (const f of RESTAURANT_FACT_SEED) {
+const snapshotId = snapshotIdsByKey.get(f.snapshotKey);
+if (snapshotId == null) continue;
+await db.insert(schema.restaurantFacts).values({
+park: f.park,
+name: f.name,
+nameKey: f.nameKey,
+serviceType: f.serviceType,
+reservationType: f.reservationType,
+reservationEvidenceKind: f.reservationEvidenceKind,
+reservationEvidence: f.reservationEvidence,
+reservationAbsenceMarkersJson: f.reservationAbsenceMarkers
+? JSON.stringify(f.reservationAbsenceMarkers)
+: null,
+reservationUnknownReason: f.reservationUnknownReason,
+mobileOrder: f.mobileOrder,
+mobileEvidenceKind: f.mobileEvidenceKind,
+mobileEvidence: f.mobileEvidence,
+mobileAbsenceMarkersJson: f.mobileAbsenceMarkers
+? JSON.stringify(f.mobileAbsenceMarkers)
+: null,
+mobileUnknownReason: f.mobileUnknownReason,
+snapshotId,
+createdAt: new Date(f.registeredAtMs),
+});
+}
 await db.delete(schema.areaTravelTimes);
 // §24 initial state: the travel matrix is not empty after a
 // reset either — it returns to exactly the bundled seed
@@ -21732,7 +21982,7 @@ return { ok: true };
 
 checkInitialState: defineAction({
 description:
-"Read-only handover self-check (spec §24): judges whether this copy is in the §24 initial state and whether the §2.1 task-manager wiring state is in place, and returns the judgement as data — one {id, ok, detail} per check plus the overall ok (true only when every check passes; a failed check's detail states the reason). Checks: the production tables exist; messages, conditions and plan sets are empty; the facility dictionary, the wait-time reference list and the area travel-time matrix each equal their bundled seed (row counts and every field, including the dictionary's bundled static attributes and the absence of photos; for the reference list's fetchMethod, migration 0018's original registration value is also accepted — it registered two of the rows before the seed existed, and the seed carries the production DB's later value); the normalized-source layer and research requests are empty; the announcement holds no row or the single saved row; the prompts are the bundled version only (no stored update) and the applied bundle loads; the app constants hold their spec values (SHARE_NOTE_URL unset, the fixed announcement / prompt-update URLs); and the task manager's production parameters hold the §2.1 initial values with no run or attempt left open. The check writes nothing, fetches nothing, and never runs the task manager's deadline judgement (no piggyback drive — closing or retrying an attempt would be a side effect). The fixed tabs are app structure, not DB state, and are not part of this check.",
+"Read-only handover self-check (spec §24): judges whether this copy is in the §24 initial state and whether the §2.1 task-manager wiring state is in place, and returns the judgement as data — one {id, ok, detail} per check plus the overall ok (true only when every check passes; a failed check's detail states the reason). Checks: the production tables exist; messages, conditions and plan sets are empty; the facility dictionary, the wait-time reference list and the area travel-time matrix each equal their bundled seed (row counts and every field, including the dictionary's bundled static attributes, the recorded photo URLs bundled on 68 entries and the absence of photo bytes, and the bundled restaurant snapshots and facts (record DF); for the reference list's fetchMethod, migration 0018's original registration value is also accepted — it registered two of the rows before the seed existed, and the seed carries the production DB's later value); the normalized-source layer and research requests are empty; the announcement holds no row or the single saved row; the prompts are the bundled version only (no stored update) and the applied bundle loads; the app constants hold their spec values (SHARE_NOTE_URL unset, the fixed announcement / prompt-update URLs); and the task manager's production parameters hold the §2.1 initial values with no run or attempt left open. The check writes nothing, fetches nothing, and never runs the task manager's deadline judgement (no piggyback drive — closing or retrying an attempt would be a side effect). The fixed tabs are app structure, not DB state, and are not part of this check.",
 request: z.object({}),
 response: z.object({
 ok: z.boolean(),

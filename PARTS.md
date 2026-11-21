@@ -27,13 +27,14 @@
 | PDF生成 | `parts/client/src/pdf.ts` | `client/src/pdf.ts` | 68,365 |
 | プラン集計 | `parts/client/src/plan_metrics.ts` | `client/src/plan_metrics.ts` | 10,301 |
 | クライアント配管・スタイル | `parts/client/src/{api.ts, main.tsx, theme.css, globals.d.ts}`、`parts/client/{index.html, build.mjs}` | 同名パス | 計9,588 |
-| サーバー全体（決定的ロジック・タスク管理クラス・取得計画・実行ログを含む） | `parts/server/src/actions.ts` | `server/src/actions.ts` | 860,802 |
-| 辞書の種（リセット時の初期状態の復元） | `parts/server/src/facility_seed.ts` | `server/src/facility_seed.ts` | 23,610 |
+| サーバー全体（決定的ロジック・タスク管理クラス・取得計画・実行ログを含む） | `parts/server/src/actions.ts` | `server/src/actions.ts` | 910,593 |
+| 辞書の種（リセット時の初期状態の復元） | `parts/server/src/facility_seed.ts` | `server/src/facility_seed.ts` | 34,634 |
+| レストランファクトの種（リセット時の初期状態の復元） | `parts/server/src/restaurant_fact_seed.ts` | `server/src/restaurant_fact_seed.ts` | 35,496 |
 | 待ち時間参考サイトの種（リセット時の初期状態の復元） | `parts/server/src/wait_time_seed.ts` | `server/src/wait_time_seed.ts` | 3,418 |
 | 移動時間の種（リセット時の初期状態の復元） | `parts/server/src/travel_time_seed.ts` | `server/src/travel_time_seed.ts` | 11,480 |
-| プロンプトファイル（AI指示文の本体と読み込み） | `parts/server/src/prompts/prompts.json`、`parts/server/src/prompts/loader.ts`、`parts/server/src/prompts/json.d.ts` | 同名パス | 計235,286 |
-| データモデル | `parts/server/src/schema.ts` | `server/src/schema.ts` | 69,286 |
-| スキーマ移行（SQL 50本＋ジャーナル） | `parts/drizzle/` | `drizzle/` | 計112,855 |
+| プロンプトファイル（AI指示文の本体と読み込み） | `parts/server/src/prompts/prompts.json`、`parts/server/src/prompts/loader.ts`、`parts/server/src/prompts/json.d.ts` | 同名パス | 計236,799 |
+| データモデル | `parts/server/src/schema.ts` | `server/src/schema.ts` | 70,708 |
+| スキーマ移行（SQL 52本＋ジャーナル） | `parts/drizzle/` | `drizzle/` | 計174,844 |
 | 依存マニフェスト | `parts/package.json` | `package.json` | 953 |
 | パーツの説明 | `parts/README.md` | （今回作成） | — |
 
@@ -114,6 +115,10 @@
 
 記録DC（2026-11-22）での更新：サーバー側アクションの開始／終了の過程記録の記録先を、そのアクションを呼んだ処理自身の実行に限る形に変えた。内容は記録DCのとおり（対象12アクションの要求に任意項目 planSetId を足し、渡された場合だけそのセットの開いている実行に記録する。渡されない呼び出しは記録しない。prompts.json は版20・記録DC：shared.canonicalFetchSteps と、文脈なしに呼び出しを指示していた generation.seg8・partial.seg5 に、条件つきの planSetId の一文を足した。）
 
+記録DE（2026-11-22）での更新：施設写真をURLの形で同梱し、各コピーが一度だけ取り込んで以後は再利用する形にした。内容は記録DEのとおり（data/facility-photos.json に68施設分の写真URLを置いた。内訳は公式67件・参考画像1件であり、配布側が公式ページの実物確認で確定した。辞書の種が記録URLを持ち、各コピーは保存時にそのURLから1回だけバイト列を取り込んで辞書に保存し、以後は再利用する（「一度取得したらその後は取得しない」）。辞書にも既存のどのプランの行にも写真が無い施設だけが、プラン作成の保存後に画像取得タスク（タスク管理経由）で自動取得される。移行0051で facilities に image_url 列を追加した。prompts.json は版21になり、generation.seg4・seg8、partial.seg3、sameDay.base、images.base の写真の文を imageRecorded の形に統一した。）
+
+記録DF（2026-11-22）での更新：レストランファクト12行と根拠スナップショット12件を同梱し、初期状態とリセットで参照を保って入る形にした。内容は記録DFのとおり（本番DBから読み取り専用で書き出して data/restaurant-facts.json に置き、registeredAt は元の登録時刻を保持する。種 restaurant_fact_seed.ts と移行0052で、初期状態とリセットで source_snapshots と restaurant_facts に参照を保って入る形にした。有効期間（登録から180日）内は生成時にレストラン詳細を取り直さない。期間が切れた後は現行の経路（倉庫が主）に戻る。営業時間・休止はファクトの対象外のままである。）
+
 drizzle 0020 は、エリア間移動マトリクスの実データを登録する移行であり、
 スキーマだけでなく確定データも含んでいる。そのまま含めた。
 
@@ -175,6 +180,17 @@ drizzle 0020 は、エリア間移動マトリクスの実データを登録す�
   初期値に戻る。種（parts/server/src/travel_time_seed.ts）と移行0050にも同じ
   内容が写しとして入っている。本番DBで実行時に蓄積された分は初期値ではない
   ため含めていない。
+
+- `data/facility-photos.json`（27,089バイト、v1＝記録DEで写真URLを同梱）：
+  施設写真のURL 68施設分（公式67件・参考画像1件）。写真のバイト列そのものは
+  含めず、URLの形でのみ同梱する。各コピーは保存時にそのURLから1回だけ
+  バイト列を取り込んで辞書に保存し、以後は再利用する。
+
+- `data/restaurant-facts.json`（36,982バイト、v1＝記録DFでファクトを同梱）：
+  レストランファクト12行と、その根拠スナップショット12件。本番DBから
+  読み取り専用で書き出したもので、各ファクトの registeredAt は元の登録時刻を
+  保持する。種（parts/server/src/restaurant_fact_seed.ts）と移行0052にも同じ
+  内容が写しとして入っている。営業時間・休止はファクトの対象外である。
 
 座標を同梱する判断について：施設は移動しない。価格や制度のような変動データとは性質が違い、
 世界の定数側のデータである。実行時の取得は、新施設の追加と既存分の照合のためだけに残る。

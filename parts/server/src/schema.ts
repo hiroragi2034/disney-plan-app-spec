@@ -621,8 +621,10 @@ export const planItems = sqliteTable("plan_items", {
 // (facility_seed.ts / migration 0035, from data/facility-coordinates.json):
 // coordinates for all 75 entries plus the static attributes fetched
 // and accumulated in the production dictionary (record CU —
-// officialUrl / durationMin; photos are not bundled, as the
-// production store holds only owned-copy blob keys). Runtime fetches
+// officialUrl / durationMin; record DE — photo URLs determined
+// once by the distributor are bundled as imageUrl, while the photo
+// bytes themselves are not: each copy downloads them once from the
+// recorded URL). Runtime fetches
 // (generation / image-fetch tasks) add new facilities and fill only
 // missing or expired attributes from there.
 // Keyed by park + normalized facility name. Only static attributes
@@ -686,6 +688,14 @@ export const facilities = sqliteTable(
     }),
     lat: real("lat"),
     lng: real("lng"),
+    // The recorded intro-photo URL (record DE): the URL the
+    // distributor determined ONCE for this facility (bundled in the
+    // seed for 68 facilities), from which this copy downloads the
+    // photo bytes exactly once. Null until a photo URL has been
+    // recorded for the facility. imageSource doubles as the kind of
+    // this recorded URL until the bytes are stored, and as the kind
+    // of the stored photo afterwards (it is the same photo).
+    imageUrl: text("image_url"),
     // Owned copy (ctx.blobs) of the facility's intro photo, shared by
     // every plan item of this facility instead of re-downloaded per
     // plan set.

@@ -1,7 +1,6 @@
 # MANIFEST.sha256 — 配布形v2 パーツ同一性マニフェスト
-# 生成：2026-11-21（記録DA。生成方法は記録BV）。本家の現在のソースから、本番種別の定義に従って
+# 生成：2026-11-22（記録DE・DF。生成方法は記録BV）。本家の現在のソースから、本番種別の定義に従って
 # 生成したパーツ一式について、各ファイルのSHA-256とバイト数を記録する。
-cf6f915aec86ec73ea0cea60b091025c5cc314ab0ac1985763013ef0b05be606  3802  parts/README.md
 e828666e5d505cbc481c7ddddd0d16000832fc26faf4177f3e312db2fdf1c4cc  361  parts/client/build.mjs
 c6fb34223ade689a910e81260ab130bac182c4bc6b88ea12c5f6ff2a0ad903aa  670  parts/client/index.html
 f74e4ab3bf74532fc383384840ee613a68b773a129249114db06b37b0ed4fb2e  265061  parts/client/src/App.tsx
@@ -62,13 +61,16 @@ e456863c4c8d43dfc85b6a60a7986ef453bfbfd29210bd7d0314b4b4feae7b2c  1295  parts/dr
 f1291021d74ddb80359db4717ce040be0414b7f4bd8adae8daf515e785b87bf5  509  parts/drizzle/0048_add_prompt_versions.sql
 7d90166b1fd6fd6d7b155e50b9a6a759cd16ac8d55ed285b5b2afcdabc463f24  3521  parts/drizzle/0049_seed_wait_time_sources_from_distribution_data.sql
 094e0d8e18b4dc431dd20427f70436385c2a9e7ba4e66194b7c0ae330fe66f64  15503  parts/drizzle/0050_seed_area_travel_times_from_distribution_data.sql
-7bf63d69e34700df11e42a65ca99337239dc4d55f33dbb4b54820463372261b2  7904  parts/drizzle/meta/_journal.json
+f4813d16fd2c43de0e1b23ad2a8361f2f4f8431f79a2ed082048882704eb14e4  19833  parts/drizzle/0051_add_facility_image_url_and_seed_photo_urls.sql
+b45994c5157b54cdb52e0a59bf84f6ca9f78851e45fe44c1475fb873f1287d34  41812  parts/drizzle/0052_seed_restaurant_facts_from_distribution_data.sql
+a10cc12ed907e15bc36b44e201cf994bd9b3caeb01545883ffddc3fe1eeb009d  8248  parts/drizzle/meta/_journal.json
 b04db66662cf5896b0db58cbbea583473ab035743aef45daa9829517e8752757  953  parts/package.json
-bc3dc944e45e8382f652070d1f46ead4e65dfe5c825d9f8d0f2644efa90e581c  898819  parts/server/src/actions.ts
-8d305133a33f098534a2a8007c3fddce03ae88797d61e4f11f62596f09484f81  23610  parts/server/src/facility_seed.ts
+a4f13ebea31f63a024e350063467b7661310c0ea5a3f5db91a2ac2de83cd8569  910593  parts/server/src/actions.ts
+0fa711905643b1ae2cce89f8c6f1ba2e5be289d5a1cb1138e08f4367c6b8fb98  34634  parts/server/src/facility_seed.ts
 9f21e31889690f61957595b076812e611fa388c4d5a4368f562a260f92ad04db  264  parts/server/src/prompts/json.d.ts
 ab71378fb6bc28b87e2641820695795c3044baefbdca4d660df9c0b9d8cbd1d9  7729  parts/server/src/prompts/loader.ts
-18fda5459642109c1bcc2b0069e6a7d6b4cc238a4a622d9b4b4bcaf9e2c19f43  228395  parts/server/src/prompts/prompts.json
-fb1dc1784c7b545f87dacb0c2046482f99a2e99f9b9931094516ec62532cbf99  70108  parts/server/src/schema.ts
+c529f8c967ee4e5d2ce63a9f154ee6cf4d52d3ce62b42142cd42ea7154a834da  228806  parts/server/src/prompts/prompts.json
+376cbf608e4428f2e005e2a9726a4d569f70471ba84be2949ed512edb8f4da56  35496  parts/server/src/restaurant_fact_seed.ts
+4ee0918950bd72fe47a332d6336000722e56f787ac50c7f595efb68c38945496  70708  parts/server/src/schema.ts
 db404d13293b373080d37de93bc5889f21df7fc1ee2df86e979198b6b9186365  11480  parts/server/src/travel_time_seed.ts
 dc0b1f889ff96d519c91232c98e276077090f02a013f3df7d8a604250ea6d12f  3418  parts/server/src/wait_time_seed.ts

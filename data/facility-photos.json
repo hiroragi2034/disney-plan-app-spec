@@ -1,0 +1,583 @@
+{
+ "provenance": "Facility intro-photo URLs determined once by the distributor from the actual official facility pages (main visual) on 2026-11-22; a Wikimedia Commons reference image only where no official photo could be determined. Bundled as URLs only (no image bytes), per spec section 17 / record DE. Facilities not listed here have no bundled photo; each copy fetches those once at plan creation time.",
+ "version": 1,
+ "confirmedAt": "2026-11-22",
+ "counts": {
+  "facilities": 75,
+  "bundled": 68,
+  "official": 67,
+  "reference": 1,
+  "notBundled": 7
+ },
+ "photos": [
+  {
+   "park": "sea",
+   "name": "ヴェネツィアン・ゴンドラ",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/581_main_visual_name_1.jpg?mod=20261021143829",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/230/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "ソアリン：ファンタスティック・フライト",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/1005_main_visual_name_1.jpg?mod=20261020141145",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/219/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "ディズニー・クリスマス・グリーティング",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/show/2347_main_visual_name_1.jpg?mod=20261013104359",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/show/detail/953/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "カフェ・ポルトフィーノ",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/restaurant/522_main_visual_name_1.jpg?mod=20260915110534",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/restaurant/detail/400/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "タートル・トーク",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/91_main_visual_name_1.jpg?mod=20261021151841",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/246/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "トイ・ストーリー・マニア！",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/161_main_visual_name_1.jpg?mod=20261020141402",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/218/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "タワー・オブ・テラー",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/71_main_visual_name_1.jpg?mod=20261105161008",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/243/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "ニューヨーク・デリ",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/restaurant/642_main_visual_name_1.jpg?mod=20260915100635",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/restaurant/detail/422/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "ビリーヴ！～シー・オブ・ドリームス～",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/show/2067_main_visual_name_1.jpg?mod=20261013102016",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/en/tds/show/detail/967/",
+   "note": "英語ページで確認",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "スターブライト・クリスマス",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/show/416_main_visual_name_1.jpg?mod=20261001102651",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/show/detail/952/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "アナとエルサのフローズンジャーニー",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/1110_main_visual_name_1.jpg?mod=20261027101057",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/en/tds/attraction/detail/255/",
+   "note": "英語ページで確認",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "ラプンツェルのランタンフェスティバル",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/1117_main_visual_name_1.jpg?mod=20261020141916",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/256/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "フェアリー・ティンカーベルのビジーバギー",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/1131_main_visual_name_1.jpg?mod=20261027101152",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/258/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "アレンデール・ロイヤルバンケット",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/restaurant/2730_main_visual_name_1.jpg?mod=20260401100828",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/restaurant/detail/409/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "センター・オブ・ジ・アース",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/631_main_visual_name_1.jpg?mod=20261020142012",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/223/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "海底2万マイル",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/621_main_visual_name_1.jpg?mod=20261021154023",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/224/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "シンドバッド・ストーリーブック・ヴォヤッジ",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/511_main_visual_name_1.jpg?mod=20261021153413",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/en/tds/attraction/detail/235/",
+   "note": "英語ページで確認",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "マジックランプシアター",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/331_main_visual_name_1.jpg?mod=20261021145153",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/226/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "カスバ・フードコート",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/restaurant/512_main_visual_name_1.jpg?mod=20260115104659",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/restaurant/detail/463/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "ニモ＆フレンズ・シーライダー",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/963_main_visual_name_1.jpg?mod=20261021152251",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/247/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "リストランテ・ディ・カナレット",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/restaurant/762_main_visual_name_1.jpg?mod=20260730104650",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/restaurant/detail/408/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "ダンス・ザ・グローブ！",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/show/2699_main_visual_name_1.jpg?mod=20261013102101",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/show/detail/7604/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "ケープコッド・クックオフ",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/restaurant/532_main_visual_name_1.jpg?mod=20260915100541",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/restaurant/detail/446/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "【環境演出】スパークリング・ジュビリー・ナイト",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/show/2741_main_visual_name_1.jpg?mod=20261013104503",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/show/detail/7405/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "ピーターパンのネバーランドアドベンチャー",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/1124_main_visual_name_1.jpg?mod=20261020141819",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/257/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "ジャンピン・ジェリーフィッシュ",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/551_main_visual_name_1.jpg?mod=20261021145405",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/en/tds/attraction/detail/239/",
+   "note": "英語ページで確認",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "ジャスミンのフライングカーペット",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/541_main_visual_name_1.jpg?mod=20261021153209",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/220/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "インディ・ジョーンズ・アドベンチャー：クリスタルスカルの魔宮",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/531_main_visual_name_1.jpg?mod=20261020141459",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/222/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "レイジングスピリッツ",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/371_main_visual_name_1.jpg?mod=20261020141630",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/attraction/detail/242/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "スカイ・フル・オブ・カラーズ",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/show/2383_main_visual_name_1.jpg?mod=20260916100937",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/show/detail/7800/",
+   "note": "検索で見つかった公式show詳細ページ（TDL版）でmain_visualを確認。両パーク共通の花火ショー",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "ニューデイ、ニュードリームス",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/show/2685_main_visual_name_1.jpg?mod=20261026161152",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/show/detail/7802/",
+   "note": "検索で見つかった公式show詳細ページ（TDL版）でmain_visualを確認。両パーク共通の花火ショー",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "スナグリーダックリング",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/restaurant/2744_main_visual_name_1.jpg?mod=20260129101115",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/restaurant/detail/413/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "ルックアウト・クックアウト",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/restaurant/2751_main_visual_name_1.jpg?mod=20260129101146",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/en/tds/restaurant/detail/414/",
+   "note": "英語ページで確認",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "ファンタジースプリングス・ギフト",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/shop/1721_main_visual_name_1.jpg?mod=20260407160944",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/shop/detail/720/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "ケープコッド・クックオフ（ショーダイニングエリア）",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/restaurant/2492_main_visual_name_1.jpg?mod=20260730104953",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/restaurant/detail/447/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "美女と野獣“魔法のものがたり”",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/1054_main_visual_name_1.jpg?mod=20261020140649",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/197/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "イッツ・ア・スモールワールド",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/11_main_visual_name_1.jpg?mod=20260629101239",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/172/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "プーさんのハニーハント",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/661_main_visual_name_1.jpg?mod=20261020140744",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/174/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "空飛ぶダンボ",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/431_main_visual_name_1.jpg?mod=20251208102513",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/169/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "アリスのティーパーティー",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/1_main_visual_name_1.jpg?mod=20251208102221",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/173/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "ベイマックスのハッピーライド",
+   "photoUrl": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/Tokyo_Disneyland_The_Happy_Ride_with_Baymax_%2853441939663%29.jpg/250px-Tokyo_Disneyland_The_Happy_Ride_with_Baymax_%2853441939663%29.jpg",
+   "kind": "reference",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/196/",
+   "source": "https://en.wikipedia.org/wiki/The_Happy_Ride_with_Baymax",
+   "note": "公式ページの抽出にImages一覧なし。Commons検索でファイルページ自体は返らず、Wikipedia記事に掲載されたWikimedia Commonsホスト画像（upload.wikimedia.org/wikipedia/commons/）を採用。500pxサムネイルはツール出力に現れなかったため250pxのまま。",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "カリブの海賊",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/51_main_visual_name_1.jpg?mod=20260122101415",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/152/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "ミッキーのフィルハーマジック",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/641_main_visual_name_1.jpg?mod=20251208102852",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/en/tdl/attraction/detail/167/",
+   "note": "英語ページで確認",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "プラザパビリオン・レストラン",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/restaurant/322_main_visual_name_1.jpg?mod=20261116131238",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/restaurant/detail/335/",
+   "note": "公式URLなしのため検索で公式詳細ページ /tdl/restaurant/detail/335/ を発見し確定。",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "カントリーベア・シアター",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/61_main_visual_name_1.jpg?mod=20261102101856",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/158/",
+   "note": "公式URLなしのため検索で公式詳細ページ /tdl/attraction/detail/158/ を発見し確定。",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "カフェ・オーリンズ",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/restaurant/31_main_visual_name_1.jpg?mod=20261116130430",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/restaurant/detail/321/",
+   "note": "公式URLなしのため検索で公式詳細ページ /tdl/restaurant/detail/321/ を発見し確定。",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "イーストサイド・カフェ",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/restaurant/1_main_visual_name_1.jpg?mod=20261116130048",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/restaurant/detail/300/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "ザ・ダイヤモンドホースシュー",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/restaurant/122_main_visual_name_1.jpg?mod=20261116131014",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/restaurant/detail/336/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "ウエスタンリバー鉄道",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/31_main_visual_name_1.jpg?mod=20260122101348",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/154/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "オムニバス",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/41_main_visual_name_1.jpg?mod=20260122101251",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/151/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "ミッキーの家とミート・ミッキー",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/greeting/1_main_visual_name_1.jpg?mod=20261119100620",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/greeting/detail/909/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "キャプテンフックス・ギャレー",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/restaurant/41_main_visual_name_1.jpg?mod=20261116131438",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/restaurant/detail/346/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "ディズニーシー・エレクトリックレールウェイ（ポートディスカバリー）",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/471_main_visual_name_1.jpg?mod=20261021144735",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/en/tds/attraction/detail/231/",
+   "note": "英語ページで確認",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "sea",
+   "name": "ドリームス・テイク・フライト",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/show/2608_main_visual_name_1.jpg?mod=20261013102141",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tds/show/detail/7602/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "モンスターズ・インク“ライド＆ゴーシーク！”",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/321_main_visual_name_1.jpg?mod=20261020141027",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/189/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "キャッスルカルーセル",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/141_main_visual_name_1.jpg?mod=20261027100948",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/170/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "ミニー＠ファンダーランド",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/show/2488_main_visual_name_1.jpg?mod=20261104140329",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/en/tdl/show/detail/897/",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "トイズ・ワンダラス・クリスマス！",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/show/2671_main_visual_name_1.jpg?mod=20261013101554",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/show/detail/7003/",
+   "note": "スケジュールページ(7003)に対応する公式詳細ページのImages[0]、イメージ1 main_visual",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "ディズニー・ハーモニー・イン・カラー",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/show/2368_main_visual_name_1.jpg?mod=20261013101715",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/show/detail/7000/",
+   "note": "スケジュールページ(7000)に対応する公式詳細ページのImages[0]、イメージ1 main_visual",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "ミッキーのマジカルミュージックワールド",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/show/1920_main_visual_name_1.jpg?mod=20261013101753",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/show/detail/895/",
+   "note": "スケジュールページ(895)に対応する公式詳細ページのImages[0]、イメージ1 main_visual",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "東京ディズニーランド・エレクトリカルパレード・ドリームライツ",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/show/1_main_visual_name_1.jpg?mod=20261013101521",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/en/tdl/show/detail/913/",
+   "note": "日本語詳細ページの取得コピーにImages一覧が無かったため、公式英語詳細ページ(913)のImages[0]で確認",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "スターブライト・クリスマス",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/show/411_main_visual_name_1.jpg?mod=20261001102613",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/show/detail/951/",
+   "note": "スケジュールページ(951)に対応する公式詳細ページのImages[0]、イメージ1 main_visual",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "ピーターパン空の旅",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/521_main_visual_name_1.jpg?mod=20251208102627",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/en/tdl/attraction/detail/164/",
+   "note": "検索で見つけた公式詳細ページ(日本語 detail/164)の取得コピーにImages一覧が無かったため、公式英語詳細ページのImages[0]で確認",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "ジャンボリミッキー！レッツ・ダンス！",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/show/2207_main_visual_name_1.jpg?mod=20261013102429",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/show/detail/985/",
+   "note": "スケジュールページ(985)に対応する公式詳細ページのImages[0]、イメージ1 main_visual",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "センターストリート・コーヒーハウス",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/restaurant/172_main_visual_name_1.jpg?mod=20261113100406",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/restaurant/detail/306/",
+   "note": "検索で見つけた公式レストラン詳細ページのImages[0]、イメージ1 main_visual",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "ホーンテッドマンション",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/611_main_visual_name_1.jpg?mod=20261020140849",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/171/",
+   "note": "検索で見つけた公式アトラクション詳細ページのImages[0]、イメージ1 main_visual",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "ジャングルクルーズ：ワイルドライフ・エクスペディション",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/231_main_visual_name_1.jpg?mod=20260915103023",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/tdl/attraction/detail/153/",
+   "note": "指定公式ページのImages[0]、イメージ1 main_visual",
+   "confirmedAt": "2026-11-22"
+  },
+  {
+   "park": "land",
+   "name": "魅惑のチキルーム：スティッチ・プレゼンツ“アロハ・エ・コモ・マイ！”",
+   "photoUrl": "https://media1.tokyodisneyresort.jp/images/adventure/attraction/571_main_visual_name_1.jpg?mod=20251208101740",
+   "kind": "official",
+   "sourcePageUrl": "https://www.tokyodisneyresort.jp/en/tdl/attraction/detail/156/",
+   "note": "英語ページで確認",
+   "confirmedAt": "2026-11-22"
+  }
+ ]
+}

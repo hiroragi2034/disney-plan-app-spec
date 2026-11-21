@@ -351,6 +351,20 @@
       "when": 1795366800000,
       "tag": "0050_seed_area_travel_times_from_distribution_data",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1795453200000,
+      "tag": "0051_add_facility_image_url_and_seed_photo_urls",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "6",
+      "when": 1795453201000,
+      "tag": "0052_seed_restaurant_facts_from_distribution_data",
+      "breakpoints": true
     }
   ]
 }
