@@ -22,14 +22,15 @@
 | パーツ | リポジトリ内パス | 出所 | バイト数 |
 |---|---|---|---|
 | 地図層（仮想地図ライブラリ） | `parts/client/src/map_helpers.mjs` | `client/src/map_helpers.mjs` | 31,120 |
-| クライアント全体 | `parts/client/src/App.tsx` | `client/src/App.tsx` | 263,554 |
+| クライアント全体 | `parts/client/src/App.tsx` | `client/src/App.tsx` | 265,061 |
 | PDF生成 | `parts/client/src/pdf.ts` | `client/src/pdf.ts` | 68,365 |
 | プラン集計 | `parts/client/src/plan_metrics.ts` | `client/src/plan_metrics.ts` | 10,301 |
 | クライアント配管・スタイル | `parts/client/src/{api.ts, main.tsx, theme.css, globals.d.ts}`、`parts/client/{index.html, build.mjs}` | 同名パス | 計9,588 |
-| サーバー全体（決定的ロジック・タスク管理クラス・取得計画・実行ログを含む） | `parts/server/src/actions.ts` | `server/src/actions.ts` | 1,046,048 |
+| サーバー全体（決定的ロジック・タスク管理クラス・取得計画・実行ログを含む） | `parts/server/src/actions.ts` | `server/src/actions.ts` | 860,802 |
 | 辞書の種（リセット時の初期状態の復元） | `parts/server/src/facility_seed.ts` | `server/src/facility_seed.ts` | 16,280 |
-| データモデル | `parts/server/src/schema.ts` | `server/src/schema.ts` | 67,101 |
-| スキーマ移行（SQL 47本＋ジャーナル） | `parts/drizzle/` | `drizzle/` | 計84,145 |
+| プロンプトファイル（AI指示文の本体と読み込み） | `parts/server/src/prompts/prompts.json`、`parts/server/src/prompts/loader.ts`、`parts/server/src/prompts/json.d.ts` | 同名パス | 計216,120 |
+| データモデル | `parts/server/src/schema.ts` | `server/src/schema.ts` | 69,286 |
+| スキーマ移行（SQL 47本＋ジャーナル） | `parts/drizzle/` | `drizzle/` | 計84,802 |
 | 依存マニフェスト | `parts/package.json` | `package.json` | 953 |
 | パーツの説明 | `parts/README.md` | （今回作成） | — |
 
@@ -65,6 +66,8 @@
 記録CB（2026-11-21）での更新：内部のプロンプト検証（試作）で見つかった、DPAページのファクト構築における母集合の範囲の外れを本家側で直し、パーツを再生成した。内容は記録CBのとおり（手順1a(i)のファクト構築手順に、抽出の対象は母集合に含まれる施設だけであることを明記した）。
 
 記録CC（2026-11-21）での更新：内部のプロンプト検証（ケース追加）で見つかった、似た名前の施設の同一視の外れを本家側で直し、パーツを再生成した。内容は記録CCのとおり（手順1a(i)のファクト構築手順に、施設とページの行の対応づけは名前の完全一致だけで行うことを明記した。あわせて仕様書第6節にも同じ定めを明記した）。
+
+記録CD（2026-11-21）での更新：AI指示文（プロンプト）を actions.ts からファイルへ切り出し、アプリのアップデートの仕組みを実装した。内容は記録CDのとおり（本体 prompts.json と読み込み loader.ts を同梱し、同梱版が初期状態になる。移行0048で prompt_versions・prompt_update_state を新設し、plan_sets に版固定の列を足した。actions.ts は指示文の本文を持たなくなり、860,802バイトになった）。
 
 drizzle 0020 は、エリア間移動マトリクスの実データを登録する移行であり、
 スキーマだけでなく確定データも含んでいる。そのまま含めた。
